@@ -1,7 +1,9 @@
 
 import React, { useState } from 'react';
-import { X, CheckCircle, Calendar, Plane, Hotel, DollarSign, Info } from 'lucide-react';
-import { TravelRequest, QuotationOption } from '../types';
+import { X, CheckCircle, Info } from 'lucide-react';
+import { TravelRequest } from '../types';
+import { formatCurrency } from '../utils/formatters'; // Shared
+import { ServiceIcon } from './common/ServiceIcon'; // Shared
 
 interface QuotationSelectionModalProps {
   request: TravelRequest;
@@ -53,7 +55,7 @@ export const QuotationSelectionModal: React.FC<QuotationSelectionModalProps> = (
 
                         <div className="p-5 border-b border-slate-100">
                             <h3 className="font-bold text-lg text-slate-900">{quote.name}</h3>
-                            <div className="text-2xl font-bold text-green-600 mt-2">฿ {quote.totalAmount.toLocaleString()}</div>
+                            <div className="text-2xl font-bold text-green-600 mt-2">{formatCurrency(quote.totalAmount)}</div>
                             {quote.remark && <p className="text-xs text-slate-500 mt-2 bg-slate-50 p-2 rounded">{quote.remark}</p>}
                         </div>
 
@@ -61,7 +63,7 @@ export const QuotationSelectionModal: React.FC<QuotationSelectionModalProps> = (
                             {quote.services.map((svc, idx) => (
                                 <div key={idx} className="flex gap-3 items-start">
                                     <div className={`p-2 rounded-lg shrink-0 ${svc.type === 'FLIGHT' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>
-                                        {svc.type === 'FLIGHT' ? <Plane size={16}/> : <Hotel size={16}/>}
+                                        <ServiceIcon type={svc.type} size={16}/>
                                     </div>
                                     <div>
                                         <div className="text-xs font-bold text-slate-500 uppercase">{svc.type}</div>

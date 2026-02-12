@@ -111,7 +111,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const signOut = async () => {
       await authService.signOut();
+      // Ensure all state is reset to null to trigger App.tsx guard
       setUser(null);
+      setEmployeeDetails(null);
+      setUserRole('Employee');
   };
 
   return (

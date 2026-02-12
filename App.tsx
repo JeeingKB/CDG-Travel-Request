@@ -71,7 +71,8 @@ function AppContent() {
 
   // Direct Create from Chat
   const handleCreateFromChat = async (draftData: Partial<TravelRequest>): Promise<TravelRequest> => {
-      const newId = `TR-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`;
+      // Use sequential ID generation
+      const newId = await storageService.generateNextRequestId();
       const submissionTime = new Date().toISOString();
       
       const newRequest: TravelRequest = {

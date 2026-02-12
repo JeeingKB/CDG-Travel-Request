@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { X, Check, XCircle, CornerUpLeft, FileText, User, Calendar, MapPin, DollarSign, MessageSquare } from 'lucide-react';
-import { TravelRequest, RequestStatus } from '../types';
+import { X, Check, XCircle, CornerUpLeft, Calendar, MapPin, DollarSign } from 'lucide-react';
+import { TravelRequest } from '../types';
+import { formatCurrency, formatDate } from '../utils/formatters'; // Shared
 
 interface ApprovalModalProps {
   request: TravelRequest;
@@ -49,13 +50,13 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({ request, onClose, 
                          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                             <div className="text-xs text-slate-400 font-bold uppercase mb-1">Total Cost</div>
                             <div className="font-bold text-slate-800 flex items-center gap-2">
-                                <DollarSign size={16} className="text-green-500"/> ฿ {request.actualCost?.toLocaleString() || request.estimatedCost.toLocaleString()}
+                                <DollarSign size={16} className="text-green-500"/> {formatCurrency(request.actualCost || request.estimatedCost)}
                             </div>
                         </div>
                         <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                             <div className="text-xs text-slate-400 font-bold uppercase mb-1">Dates</div>
                             <div className="font-bold text-slate-800 flex items-center gap-2">
-                                <Calendar size={16} className="text-orange-500"/> {request.trip.startDate} - {request.trip.endDate}
+                                <Calendar size={16} className="text-orange-500"/> {formatDate(request.trip.startDate)} - {formatDate(request.trip.endDate)}
                             </div>
                         </div>
                          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">

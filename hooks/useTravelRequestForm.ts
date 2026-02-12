@@ -202,8 +202,11 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
     }, [trip.startDate, trip.endDate]);
 
     // Submission Construction
-    const buildRequestObject = (status: RequestStatus = RequestStatus.PENDING_APPROVAL, policyFlags: string[] = []): TravelRequest => {
-        const id = initialData?.id || `TR-${new Date().getFullYear()}-${Math.floor(Math.random() * 100000)}`;
+    const buildRequestObject = (
+        id: string,
+        status: RequestStatus = RequestStatus.PENDING_APPROVAL, 
+        policyFlags: string[] = []
+    ): TravelRequest => {
         const submissionTime = new Date().toISOString();
         const slaDeadline = calculateSLADeadline(submissionTime, travelType);
 

@@ -50,7 +50,7 @@ export const authService = {
       await supabase.auth.signOut();
     }
     sessionStorage.removeItem('cdg-mock-session');
-    window.location.reload(); // Force refresh to clear state
+    // Removed window.location.reload() to prevent crash during React state transition
   },
 
   getCurrentUser: async () => {

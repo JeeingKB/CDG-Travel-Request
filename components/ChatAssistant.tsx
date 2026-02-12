@@ -1,11 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, X, Bot, Sparkles, FileText, Camera, Check, Loader2, MessageCircle, MapPin, Calendar, ArrowRight, Plane, User, Paperclip, Download, BarChart2, ShieldAlert, GitMerge, FileCheck, Edit, Clock } from 'lucide-react';
+import { Send, X, Bot, Sparkles, FileText, Camera, Check, Loader2, MapPin, Calendar, ArrowRight, Plane, Paperclip, Download, Edit } from 'lucide-react';
 import { parseTravelIntent, analyzeReceiptImage } from '../services/geminiService';
-import { validatePolicy, getApprovalFlow } from '../services/policyRules';
+import { getApprovalFlow } from '../services/policyRules';
 import { ChatMessage, TravelRequest, TravelType, RequestStatus, TravelerDetails } from '../types';
 import { useTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
+import { formatCurrency, formatDate } from '../utils/formatters'; // Shared
+import { getStatusStyle } from '../utils/styleHelpers'; // Shared
 
 interface ChatAssistantProps {
   isOpen: boolean;
@@ -256,15 +258,18 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, on
   };
 
   // --- RENDER COMPONENT: Request Slip ---
-  const renderRequestSlip = (req: TravelRequest) => (
+  const renderRequestSlip = (req: TravelRequest) => {
+      // Logic for slip header color based on status
+      let headerColor = 'bg-slate-700';
+      if (req.status === RequestStatus.APPROVED) headerColor = 'bg-green-600';
+      else if (req.status === RequestStatus.SUBMITTED) headerColor = 'bg-blue-600';
+      else if (req.status === RequestStatus.REJECTED) headerColor = 'bg-red-600';
+      
+      return (
       <div className="mt-4 relative bg-white rounded-xl border border-slate-300 shadow-md overflow-hidden max-w-[280px]">
-          <div className={`px-4 py-3 flex justify-between items-center text-white
-              ${req.status === RequestStatus.APPROVED ? 'bg-green-600' :
-                req.status === RequestStatus.SUBMITTED ? 'bg-blue-600' :
-                req.status === RequestStatus.REJECTED ? 'bg-red-600' :
-                'bg-slate-700'}`}>
+          <div className={`px-4 py-3 flex justify-between items-center text-white ${headerColor}`}>
               <div className="flex items-center gap-2">
-                  <FileCheck size={16} />
+                  <FileText size={16} />
                   <span className="font-bold text-xs tracking-wide uppercase">{t('chat.slip.title')}</span>
               </div>
           </div>
@@ -280,11 +285,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, on
                    </div>
                    <div className="text-right">
                        <div className="text-[10px] text-slate-500 uppercase font-bold">{t('chat.slip.status')}</div>
-                       <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase
-                           ${req.status === RequestStatus.APPROVED ? 'bg-green-100 text-green-700' :
-                             req.status === RequestStatus.SUBMITTED ? 'bg-blue-100 text-blue-700' :
-                             req.status === RequestStatus.REJECTED ? 'bg-red-100 text-red-700' :
-                             'bg-orange-100 text-orange-700'}`}>
+                       <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${getStatusStyle(req.status)}`}>
                            {req.status}
                        </span>
                    </div>
@@ -297,12 +298,12 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, on
                   </div>
                   <div className="text-right">
                       <div className="text-[10px] text-slate-500 uppercase font-bold">{t('chat.slip.cost')}</div>
-                      <div className="text-sm font-bold text-slate-800">฿ {req.estimatedCost.toLocaleString()}</div>
+                      <div className="text-sm font-bold text-slate-800">{formatCurrency(req.estimatedCost)}</div>
                   </div>
                   <div className="col-span-2">
                        <div className="text-[10px] text-slate-500 uppercase font-bold">{t('chat.slip.date')}</div>
                        <div className="text-xs text-slate-700 flex items-center gap-1">
-                           <Calendar size={12}/> {req.trip.startDate} <ArrowRight size={10}/> {req.trip.endDate}
+                           <Calendar size={12}/> {formatDate(req.trip.startDate)} <ArrowRight size={10}/> {formatDate(req.trip.endDate)}
                        </div>
                   </div>
               </div>
@@ -312,7 +313,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, on
                <div className="h-4 w-full bg-[url('https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/Barcode_Code_128B.svg/1200px-Barcode_Code_128B.svg.png')] bg-cover bg-center"></div>
           </div>
       </div>
-  );
+  )};
 
   if (!isOpen) {
     return (
@@ -391,7 +392,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, on
                           </div>
                           <div className="text-right">
                               <div className="text-xs text-slate-500">{t('chat.slip.cost')}</div>
-                              <div className="text-sm font-bold text-slate-800">฿ {((msg.data as any).estimatedCost || 0).toLocaleString()}</div>
+                              <div className="text-sm font-bold text-slate-800">{formatCurrency((msg.data as any).estimatedCost)}</div>
                           </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2 mt-2">

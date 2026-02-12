@@ -1,8 +1,11 @@
 
 import React, { useState } from 'react';
-import { Search, Filter, Pencil, Trash2, Plane, Users, ChevronRight, Eye, Calendar, MapPin } from 'lucide-react';
-import { TravelRequest, RequestStatus, RequestFor } from '../types';
+import { Search, Pencil, Trash2, MapPin, Calendar, Users } from 'lucide-react';
+import { TravelRequest, RequestStatus } from '../types';
 import { useTranslation } from '../services/translations';
+import { StatusBadge } from './common/StatusBadge'; // Shared
+import { formatCurrency, formatDate, formatRequestId } from '../utils/formatters'; // Shared
+import { getTravelTypeStyle } from '../utils/styleHelpers'; // Shared
 
 interface RequestListProps {
   requests: TravelRequest[];
@@ -88,8 +91,8 @@ export const RequestList: React.FC<RequestListProps> = ({ requests, onEdit, onDe
                     {filteredRequests.map((req) => (
                         <tr key={req.id} className="hover:bg-slate-50/80 transition-colors group cursor-pointer" onClick={() => onEdit(req)}>
                             <td className="px-6 py-4">
-                                <span className="font-mono text-sm font-semibold text-slate-700">{req.id}</span>
-                                <div className="text-[10px] text-slate-400 mt-0.5">Created {new Date(req.submittedAt || Date.now()).toLocaleDateString()}</div>
+                                <span className="font-mono text-sm font-semibold text-slate-700">{formatRequestId(req.id)}</span>
+                                <div className="text-[10px] text-slate-400 mt-0.5">Created {formatDate(req.submittedAt)}</div>
                             </td>
                             <td className="px-6 py-4">
                                 <div className="flex items-center gap-3">
@@ -99,14 +102,14 @@ export const RequestList: React.FC<RequestListProps> = ({ requests, onEdit, onDe
                                     <div>
                                         <div className="font-bold text-slate-800 text-sm">{req.trip.destination}</div>
                                         <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                                            <Calendar size={10}/> {req.trip.startDate} - {req.trip.endDate}
+                                            <Calendar size={10}/> {formatDate(req.trip.startDate)} - {formatDate(req.trip.endDate)}
                                         </div>
                                     </div>
                                 </div>
                             </td>
                             <td className="px-6 py-4">
                                 <div className="flex flex-col gap-1">
-                                    <span className={`inline-flex items-center w-fit px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${req.travelType === 'INTERNATIONAL' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                    <span className={`inline-flex items-center w-fit px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getTravelTypeStyle(req.travelType)}`}>
                                         {req.travelType === 'INTERNATIONAL' ? t('common.international') : t('common.domestic')}
                                     </span>
                                     <span className="text-xs text-slate-500 flex items-center gap-1">
@@ -115,23 +118,16 @@ export const RequestList: React.FC<RequestListProps> = ({ requests, onEdit, onDe
                                 </div>
                             </td>
                             <td className="px-6 py-4">
-                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold
-                                    ${req.status === RequestStatus.APPROVED ? 'bg-green-100 text-green-700' : 
-                                    req.status === RequestStatus.PENDING_APPROVAL ? 'bg-orange-100 text-orange-700' : 
-                                    req.status === RequestStatus.SUBMITTED ? 'bg-blue-100 text-blue-700' :
-                                    req.status === RequestStatus.REJECTED ? 'bg-red-100 text-red-700' :
-                                    'bg-slate-100 text-slate-600'}`}>
-                                    {t(`status.${req.status}`)}
-                                </span>
+                                <StatusBadge status={req.status} />
                             </td>
                             <td className="px-6 py-4 text-right">
                                 {req.actualCost ? (
                                     <div className="flex flex-col items-end">
-                                        <span className="font-bold text-green-700 text-sm">฿ {req.actualCost.toLocaleString()}</span>
-                                        <span className="text-[10px] text-slate-400 line-through">Est: ฿ {req.estimatedCost.toLocaleString()}</span>
+                                        <span className="font-bold text-green-700 text-sm">{formatCurrency(req.actualCost)}</span>
+                                        <span className="text-[10px] text-slate-400 line-through">Est: {formatCurrency(req.estimatedCost)}</span>
                                     </div>
                                 ) : (
-                                    <span className="text-sm font-semibold text-slate-600">฿ {Number(req.estimatedCost).toLocaleString()}</span>
+                                    <span className="text-sm font-semibold text-slate-600">{formatCurrency(req.estimatedCost)}</span>
                                 )}
                             </td>
                             <td className="px-6 py-4 text-right relative z-20">

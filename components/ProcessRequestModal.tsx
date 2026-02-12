@@ -1,14 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  X, Mail, DollarSign, CheckCircle, AlertTriangle, 
-  Send, Loader2, ArrowRight, FileText, Globe, Clock,
-  Plane, Hotel, Car, Shield, Ticket, Pencil, Save, Calendar, MapPin, Eye, ExternalLink, Sparkles, ClipboardPaste, Plus, Trash2, Copy, SendToBack
+  X, Mail, CheckCircle, AlertTriangle, 
+  Send, Loader2, ArrowRight, Eye, Sparkles, ClipboardPaste, Plus, Trash2, Save, SendToBack, Shield
 } from 'lucide-react';
-import { TravelRequest, RequestStatus, TravelServiceItem, Agency, ServiceType, QuotationOption } from '../types';
+import { TravelRequest, RequestStatus, Agency, QuotationOption } from '../types';
 import { checkPolicyCompliance, parseVendorQuote } from '../services/geminiService';
 import { getSLAStatus } from '../services/slaService';
 import { storageService } from '../services/storage';
+import { formatCurrency } from '../utils/formatters'; // Shared
+import { ServiceIcon } from './common/ServiceIcon'; // Shared
 
 interface ProcessRequestModalProps {
   request: TravelRequest;
@@ -354,7 +355,7 @@ export const ProcessRequestModal: React.FC<ProcessRequestModalProps> = ({ reques
                                    >
                                        <div className="flex justify-between items-center mb-1">
                                            <span className="font-bold text-sm text-slate-800">{quote.name}</span>
-                                           <span className="font-mono text-sm font-bold text-green-600">฿ {quote.totalAmount.toLocaleString()}</span>
+                                           <span className="font-mono text-sm font-bold text-green-600">{formatCurrency(quote.totalAmount)}</span>
                                        </div>
                                        <div className="text-xs text-slate-500 truncate">{quote.remark || `${quote.services.length} services`}</div>
                                        
@@ -382,14 +383,14 @@ export const ProcessRequestModal: React.FC<ProcessRequestModalProps> = ({ reques
                                            onChange={(e) => updateActiveQuoteName(e.target.value)}
                                            className="bg-transparent font-bold text-lg text-slate-800 border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none"
                                        />
-                                       <div className="text-sm text-slate-500">Total: <span className="text-xl font-bold text-slate-900">฿ {activeQuote.totalAmount.toLocaleString()}</span></div>
+                                       <div className="text-sm text-slate-500">Total: <span className="text-xl font-bold text-slate-900">{formatCurrency(activeQuote.totalAmount)}</span></div>
                                    </div>
 
                                    <div className="p-4 flex-1 overflow-y-auto space-y-3">
                                        {activeQuote.services.map((svc, idx) => (
                                            <div key={svc.id} className="border border-slate-100 rounded-lg p-3 flex gap-3 items-start">
                                                <div className={`p-2 rounded-lg shrink-0 ${svc.type === 'FLIGHT' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
-                                                    {svc.type === 'FLIGHT' ? <Plane size={18}/> : <Hotel size={18}/>}
+                                                    <ServiceIcon type={svc.type} size={18}/>
                                                </div>
                                                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
                                                    <div>

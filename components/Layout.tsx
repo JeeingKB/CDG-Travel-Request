@@ -48,12 +48,27 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate
 
   const currentLang = languages.find(l => l.code === language);
 
-  // Mock Notifications
-  const notifications = [
+  // --- Notification Logic ---
+  const [notifications, setNotifications] = useState([
       { id: 1, title: 'Request Approved', desc: 'Your trip to Tokyo has been approved.', time: '2h ago', unread: true },
       { id: 2, title: 'Quotation Received', desc: 'Vendor sent 3 options for Singapore.', time: '5h ago', unread: true },
       { id: 3, title: 'System Update', desc: 'New policy regarding hotel limits updated.', time: '1d ago', unread: false },
-  ];
+  ]);
+
+  const unreadCount = notifications.filter(n => n.unread).length;
+
+  const handleMarkAllRead = () => {
+      setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
+  };
+
+  const handleNotificationClick = (id: number) => {
+      // Mark specific as read
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, unread: false } : n));
+      // Close dropdown
+      setIsNotifyOpen(false);
+      // Navigate to My Requests (assuming notifications are mostly about requests)
+      onNavigate('MY_REQUESTS');
+  };
 
   return (
     <div className="flex min-h-screen bg-[#f8fafc]">
@@ -142,29 +157,39 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate
                     className="relative text-slate-400 hover:text-slate-600 transition-colors p-2 rounded-lg hover:bg-slate-100"
                 >
                     <Bell size={20} />
-                    <span className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white"></span>
+                    {unreadCount > 0 && (
+                        <span className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white"></span>
+                    )}
                 </button>
 
                 {isNotifyOpen && (
                     <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-fade-in-up">
                         <div className="px-4 py-3 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
-                            <h3 className="font-bold text-sm text-slate-800">Notifications</h3>
-                            <span className="text-xs text-blue-600 font-bold cursor-pointer">Mark all read</span>
+                            <h3 className="font-bold text-sm text-slate-800">Notifications {unreadCount > 0 && `(${unreadCount})`}</h3>
+                            <button onClick={handleMarkAllRead} className="text-xs text-blue-600 font-bold cursor-pointer hover:underline">Mark all read</button>
                         </div>
                         <div className="max-h-64 overflow-y-auto">
-                            {notifications.map(n => (
-                                <div key={n.id} className="px-4 py-3 border-b border-slate-50 hover:bg-slate-50 cursor-pointer flex gap-3">
-                                    <div className={`w-2 h-2 mt-2 rounded-full shrink-0 ${n.unread ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
-                                    <div>
-                                        <div className="text-sm font-bold text-slate-800">{n.title}</div>
-                                        <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.desc}</div>
-                                        <div className="text-[10px] text-slate-400 mt-1">{n.time}</div>
+                            {notifications.length === 0 ? (
+                                <div className="p-4 text-center text-xs text-slate-400">No notifications</div>
+                            ) : (
+                                notifications.map(n => (
+                                    <div 
+                                        key={n.id} 
+                                        onClick={() => handleNotificationClick(n.id)}
+                                        className={`px-4 py-3 border-b border-slate-50 hover:bg-slate-50 cursor-pointer flex gap-3 transition-colors ${n.unread ? 'bg-blue-50/30' : ''}`}
+                                    >
+                                        <div className={`w-2 h-2 mt-2 rounded-full shrink-0 ${n.unread ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
+                                        <div>
+                                            <div className={`text-sm ${n.unread ? 'font-bold text-slate-900' : 'font-medium text-slate-700'}`}>{n.title}</div>
+                                            <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.desc}</div>
+                                            <div className="text-[10px] text-slate-400 mt-1">{n.time}</div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))
+                            )}
                         </div>
                         <div className="p-2 bg-slate-50 text-center">
-                            <button className="text-xs font-bold text-slate-600 hover:text-slate-900">View All</button>
+                            <button onClick={() => { setIsNotifyOpen(false); onNavigate('MY_REQUESTS'); }} className="text-xs font-bold text-slate-600 hover:text-slate-900">View All</button>
                         </div>
                     </div>
                 )}

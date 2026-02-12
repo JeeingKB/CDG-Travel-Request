@@ -4,14 +4,15 @@ import {
   ArrowLeft, User, Users, Briefcase, MapPin, 
   CalendarDays, CreditCard, Sparkles, Check, AlertCircle, 
   ChevronRight, Loader2, Building, Plus, Trash2, Info,
-  Plane, Hotel, Car, Shield, Ticket, Calculator, GitMerge, Languages, Wand2
+  Calculator, GitMerge, Languages
 } from 'lucide-react';
 import { TravelRequest, RequestFor, TravelType, TravelPolicy } from '../types';
 import { generateJustification } from '../services/geminiService';
 import { validatePolicy, calculateMileageReimbursement, getDailyPerDiem, getHotelLimit, getApprovalFlow } from '../services/policyRules';
 import { storageService } from '../services/storage';
-// Removed mockData import
 import { SearchableSelect } from './ui/SearchableSelect';
+import { ServiceIcon } from './common/ServiceIcon'; // Shared Component
+import { formatCurrency } from '../utils/formatters'; // Shared Function
 import { useTravelRequestForm } from '../hooks/useTravelRequestForm';
 import { useTranslation } from '../services/translations';
 import { useAiTranslation } from '../hooks/useAiTranslation';
@@ -30,6 +31,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
   
   const [currentStep, setCurrentStep] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [policyFeedback, setPolicyFeedback] = useState<{ compliant: boolean; message: string, flags: string[] } | null>(null);
   const [approvalFlow, setApprovalFlow] = useState<string[]>([]);
@@ -170,7 +172,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
           const maxBudget = (hotelLimit + (travelType === 'INTERNATIONAL' ? perDiem * 34 : perDiem)) * days * travelers.length + 20000; 
           
           if (estimatedCost > maxBudget && estimatedCost > 0) {
-              allFlags.push(`Total cost exceeds typical allowances (Max approx ฿${maxBudget.toLocaleString()}).`);
+              allFlags.push(`Total cost exceeds typical allowances (Max approx ${formatCurrency(maxBudget)}).`);
           }
 
           if (allFlags.length > 0) {
@@ -188,10 +190,19 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
   }, [services, trip, travelers, estimatedCost, travelType, currentPolicy, t]);
 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const request = buildRequestObject(initialData?.status, policyFeedback?.flags);
+    setIsSubmitting(true);
+    
+    // Determine ID: If edit, use existing. If new, generate next sequential ID.
+    let requestId = initialData?.id;
+    if (!requestId) {
+        requestId = await storageService.generateNextRequestId();
+    }
+    
+    const request = buildRequestObject(requestId, initialData?.status, policyFeedback?.flags);
     onSubmit(request);
+    setIsSubmitting(false);
   };
 
   // Options Handlers
@@ -492,11 +503,11 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
              <div className="space-y-8 animate-fade-in">
                 <div className="flex flex-wrap gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 justify-center">
                    <span className="w-full text-center text-xs font-bold text-slate-400 uppercase mb-1">Add Services</span>
-                   <button onClick={() => addService('FLIGHT')} className="service-btn bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"><Plane size={16}/> Flight</button>
-                   <button onClick={() => addService('HOTEL')} className="service-btn bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100"><Hotel size={16}/> Hotel</button>
-                   <button onClick={() => addService('CAR')} className="service-btn bg-green-50 text-green-700 border-green-200 hover:bg-green-100"><Car size={16}/> Car Rental</button>
-                   <button onClick={() => addService('INSURANCE')} className="service-btn bg-red-50 text-red-700 border-red-200 hover:bg-red-100"><Shield size={16}/> Insurance</button>
-                   <button onClick={() => addService('EVENT')} className="service-btn bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"><Ticket size={16}/> Event Pass</button>
+                   <button onClick={() => addService('FLIGHT')} className="service-btn bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"><ServiceIcon type="FLIGHT" size={16}/> Flight</button>
+                   <button onClick={() => addService('HOTEL')} className="service-btn bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100"><ServiceIcon type="HOTEL" size={16}/> Hotel</button>
+                   <button onClick={() => addService('CAR')} className="service-btn bg-green-50 text-green-700 border-green-200 hover:bg-green-100"><ServiceIcon type="CAR" size={16}/> Car Rental</button>
+                   <button onClick={() => addService('INSURANCE')} className="service-btn bg-red-50 text-red-700 border-red-200 hover:bg-red-100"><ServiceIcon type="INSURANCE" size={16}/> Insurance</button>
+                   <button onClick={() => addService('EVENT')} className="service-btn bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"><ServiceIcon type="EVENT" size={16}/> Event Pass</button>
                 </div>
 
                 <div className="space-y-6">
@@ -504,11 +515,9 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                       <div key={svc.id} className="border border-slate-200 rounded-xl shadow-sm animate-fade-in group bg-white">
                          <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center rounded-t-xl">
                              <div className="flex items-center gap-2 font-bold text-slate-700">
-                                {svc.type === 'FLIGHT' && <Plane size={18} className="text-blue-500"/>}
-                                {svc.type === 'HOTEL' && <Hotel size={18} className="text-orange-500"/>}
-                                {svc.type === 'CAR' && <Car size={18} className="text-green-500"/>}
-                                {svc.type === 'INSURANCE' && <Shield size={18} className="text-red-500"/>}
-                                {svc.type === 'EVENT' && <Ticket size={18} className="text-purple-500"/>}
+                                <div className={`p-1.5 rounded-lg ${svc.type === 'FLIGHT' ? 'bg-blue-100 text-blue-600' : svc.type === 'HOTEL' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'}`}>
+                                    <ServiceIcon type={svc.type} size={18}/>
+                                </div>
                                 <span>{svc.type} Request</span>
                              </div>
                              <button onClick={() => removeService(svc.id)} className="text-slate-400 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
@@ -609,7 +618,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                                           {(svc as any).mileageDistance > 0 && (
                                               <div className="mt-2 text-sm text-green-700 font-bold flex items-center gap-2">
                                                   <Calculator size={14}/>
-                                                  Reimbursement: ฿ {calculateMileageReimbursement((svc as any).mileageDistance).toLocaleString()}
+                                                  Reimbursement: {formatCurrency(calculateMileageReimbursement((svc as any).mileageDistance))}
                                               </div>
                                           )}
                                       </div>
@@ -721,11 +730,14 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
 
         {/* Footer Navigation */}
         <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center rounded-b-3xl">
-            <button type="button" onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))} disabled={currentStep === 0} className={`px-6 py-2.5 rounded-xl font-medium transition-colors ${currentStep === 0 ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-200'}`}>{t('form.back')}</button>
+            <button type="button" onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))} disabled={currentStep === 0 || isSubmitting} className={`px-6 py-2.5 rounded-xl font-medium transition-colors ${currentStep === 0 ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-200'}`}>{t('form.back')}</button>
             {currentStep < STEPS.length - 1 ? (
               <button type="button" onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))} className="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-xl font-medium flex items-center gap-2 shadow-lg">{t('form.next')} <ChevronRight size={18} /></button>
             ) : (
-              <button type="submit" onClick={handleSubmit} className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-xl font-medium flex items-center gap-2 shadow-lg shadow-green-200">{isEditMode ? t('form.update') : t('form.submit')} <Check size={18} /></button>
+              <button type="submit" onClick={handleSubmit} disabled={isSubmitting} className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-xl font-medium flex items-center gap-2 shadow-lg shadow-green-200 disabled:opacity-50">
+                  {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : (isEditMode ? t('form.update') : t('form.submit'))} 
+                  {!isSubmitting && <Check size={18} />}
+              </button>
             )}
         </div>
 

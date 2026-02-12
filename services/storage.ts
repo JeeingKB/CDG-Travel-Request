@@ -122,6 +122,38 @@ export const storageService = {
     return safeGetItem(STORAGE_KEY, []);
   },
 
+  /**
+   * Generates a sequential ID: CDG + Year + 0001
+   * Example: CDG20240001
+   */
+  generateNextRequestId: async (): Promise<string> => {
+    const requests = await storageService.getRequests();
+    const currentYear = new Date().getFullYear();
+    const prefix = `CDG${currentYear}`;
+    
+    // Filter requests that belong to the current year
+    const currentYearRequests = requests.filter(r => r.id && r.id.startsWith(prefix));
+    
+    if (currentYearRequests.length === 0) {
+        return `${prefix}0001`;
+    }
+
+    // Extract the numeric part and find the max
+    let maxSeq = 0;
+    currentYearRequests.forEach(r => {
+        // ID format: CDG2024xxxx
+        const numericPart = r.id.replace(prefix, '');
+        const seq = parseInt(numericPart, 10);
+        if (!isNaN(seq) && seq > maxSeq) {
+            maxSeq = seq;
+        }
+    });
+
+    // Increment and pad
+    const nextSeq = maxSeq + 1;
+    return `${prefix}${nextSeq.toString().padStart(4, '0')}`;
+  },
+
   saveRequest: async (request: TravelRequest): Promise<TravelRequest[]> => {
     const settings = storageService.getSettings();
     let savedToCloud = false;
