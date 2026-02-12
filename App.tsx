@@ -8,20 +8,21 @@ import { ProcessRequestModal } from './components/ProcessRequestModal';
 import { PolicySettings } from './components/PolicySettings'; 
 import { RequestList } from './components/RequestList'; 
 import { ApprovalModal } from './components/ApprovalModal';
-import { TravelRequest, ViewState, UserRole, RequestStatus } from './types';
+import { QuotationSelectionModal } from './components/QuotationSelectionModal';
+import { LoginPage } from './components/LoginPage'; // NEW
+import { AuthProvider, useAuth } from './contexts/AuthContext'; // NEW
+import { TravelRequest, ViewState, RequestStatus } from './types';
 import { storageService } from './services/storage';
 import { calculateSLADeadline } from './services/slaService'; 
-import { LanguageProvider } from './services/translations'; // Import Provider
+import { LanguageProvider } from './services/translations'; 
 
 function AppContent() {
+  const { user, isLoading: authLoading, userRole } = useAuth(); // Get real user state
   const [view, setView] = useState<ViewState>('DASHBOARD');
   const [requests, setRequests] = useState<TravelRequest[]>([]);
   const [editingRequest, setEditingRequest] = useState<Partial<TravelRequest> | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Role Management State
-  const [currentUserRole, setCurrentUserRole] = useState<UserRole>('Employee');
   
   // ADS Workflow State
   const [processingRequest, setProcessingRequest] = useState<TravelRequest | null>(null);
@@ -29,8 +30,13 @@ function AppContent() {
   // Manager Workflow State
   const [reviewingRequest, setReviewingRequest] = useState<TravelRequest | null>(null);
 
+  // Employee Selection Workflow State
+  const [selectionRequest, setSelectionRequest] = useState<TravelRequest | null>(null);
+
   // Load data (CRUD: Read)
   useEffect(() => {
+    if (!user) return; // Only load if logged in
+
     const loadData = async () => {
         setIsLoading(true);
         const data = await storageService.getRequests();
@@ -38,10 +44,9 @@ function AppContent() {
         setIsLoading(false);
     };
     loadData();
-  }, []);
+  }, [user]); // Reload when user logs in
 
   // CRUD: Create / Update
-  // Added 'keepOpen' parameter to allow saving without closing the modal/form
   const handleSaveRequest = async (request: TravelRequest, keepOpen: boolean = false) => {
     if (!request.status || request.status === RequestStatus.DRAFT) {
         request.status = RequestStatus.SUBMITTED;
@@ -53,9 +58,8 @@ function AppContent() {
         setView('DASHBOARD');
         setEditingRequest(null);
         setProcessingRequest(null); 
+        setSelectionRequest(null); // Close selection modal if open
     } else {
-        // If keeping open, we must update the specific state object 
-        // so the UI reflects the changes (e.g., status change in Modal)
         if (processingRequest && processingRequest.id === request.id) {
             setProcessingRequest(request);
         }
@@ -72,8 +76,8 @@ function AppContent() {
       
       const newRequest: TravelRequest = {
           id: newId,
-          requesterId: draftData.requesterId || 'EMP001', 
-          requesterName: draftData.requesterName || 'Alex Bennett',
+          requesterId: user?.id || 'EMP001', 
+          requesterName: user?.user_metadata?.full_name || 'User',
           requestFor: draftData.requestFor || ('SELF' as any),
           travelType: draftData.travelType || ('DOMESTIC' as any),
           travelers: draftData.travelers || [],
@@ -95,19 +99,16 @@ function AppContent() {
   
   // NEW: Update Status from Chat
   const handleStatusUpdateFromChat = async (id: string, newStatus: string): Promise<TravelRequest | null> => {
-      // Find request
       const req = requests.find(r => r.id === id);
       if (!req) return null;
 
-      // Validate Status Enum
       let validStatus: RequestStatus | null = null;
       if (Object.values(RequestStatus).includes(newStatus as RequestStatus)) {
           validStatus = newStatus as RequestStatus;
       } else {
-          // Fuzzy match or default mapping
           if (newStatus.toLowerCase().includes('approve')) validStatus = RequestStatus.APPROVED;
           else if (newStatus.toLowerCase().includes('reject')) validStatus = RequestStatus.REJECTED;
-          else if (newStatus.toLowerCase().includes('cancel')) validStatus = RequestStatus.REJECTED; // Or Cancelled if exists
+          else if (newStatus.toLowerCase().includes('cancel')) validStatus = RequestStatus.REJECTED; 
       }
 
       if (validStatus) {
@@ -122,14 +123,32 @@ function AppContent() {
   // CRUD: Delete
   const handleDeleteRequest = async (id: string) => {
     if (window.confirm('Delete this request?')) {
-      const updatedList = await storageService.deleteRequest(id);
-      setRequests(updatedList);
+      // Optimistic Update: Remove from UI immediately
+      setRequests(prev => prev.filter(r => r.id !== id));
+      
+      try {
+          const updatedList = await storageService.deleteRequest(id);
+          if (updatedList.find(r => r.id === id)) {
+              if (updatedList.length < requests.length) {
+                  setRequests(updatedList);
+              }
+          } else {
+              setRequests(updatedList);
+          }
+      } catch (error) {
+          console.error("Failed to delete request:", error);
+          alert("Failed to delete from server.");
+      }
     }
   };
 
   const handleEditRequest = (request: TravelRequest) => {
-    setEditingRequest(request);
-    setView('NEW_REQUEST');
+    if (request.status === RequestStatus.WAITING_EMPLOYEE_SELECTION && userRole === 'Employee') {
+        setSelectionRequest(request);
+    } else {
+        setEditingRequest(request);
+        setView('NEW_REQUEST');
+    }
   };
 
   const handleDraftFromAI = (data: Partial<TravelRequest>) => {
@@ -157,9 +176,31 @@ function AppContent() {
       setReviewingRequest(null);
   };
 
+  // --- Employee Selection Handler ---
+  const handleEmployeeSelection = async (req: TravelRequest, optionId: string) => {
+      const selectedOption = req.quotations?.find(q => q.id === optionId);
+      if (!selectedOption) return;
+
+      const updatedQuotes = req.quotations?.map(q => ({...q, isSelected: q.id === optionId}));
+
+      const updatedReq: TravelRequest = {
+          ...req,
+          quotations: updatedQuotes,
+          services: selectedOption.services, // Apply selected services to main record
+          actualCost: selectedOption.totalAmount, // Update actual cost
+          status: RequestStatus.PENDING_APPROVAL
+      };
+      
+      await handleSaveRequest(updatedReq);
+      setSelectionRequest(null);
+  };
+
+  // --- AUTH GUARD ---
+  if (authLoading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="animate-spin text-slate-400 rounded-full h-8 w-8 border-b-2 border-current"></div></div>;
+  if (!user) return <LoginPage />;
 
   if (isLoading && view === 'DASHBOARD' && requests.length === 0) {
-      return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading Data...</div>;
+      return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading Dashboard...</div>;
   }
 
   return (
@@ -167,19 +208,6 @@ function AppContent() {
         if (v === 'NEW_REQUEST') setEditingRequest(null);
         setView(v);
     }}>
-      {/* Role Switcher for Demo Purposes */}
-      <div className="fixed bottom-4 left-20 z-50 bg-white/90 backdrop-blur border border-slate-200 p-2 rounded-xl shadow-lg flex gap-2 print:hidden">
-         {['Employee', 'ADS', 'Manager'].map((role) => (
-             <button
-               key={role}
-               onClick={() => setCurrentUserRole(role as UserRole)}
-               className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${currentUserRole === role ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-             >
-                 {role}
-             </button>
-         ))}
-      </div>
-
       {view === 'DASHBOARD' && (
         <Dashboard 
           onRequestNew={() => {
@@ -190,7 +218,7 @@ function AppContent() {
           requests={requests}
           onEdit={handleEditRequest}
           onDelete={handleDeleteRequest}
-          role={currentUserRole}
+          role={userRole} // USE REAL ROLE
           onProcessRequest={(req) => setProcessingRequest(req)}
           onViewAllRequests={() => setView('MY_REQUESTS')}
           onReview={(req) => setReviewingRequest(req)}
@@ -204,7 +232,7 @@ function AppContent() {
             setEditingRequest(null);
             setView('DASHBOARD');
           }}
-          onSubmit={(req) => handleSaveRequest(req, false)} // Allow edit save without force close if needed, or stick to true
+          onSubmit={(req) => handleSaveRequest(req, false)} 
         />
       )}
 
@@ -226,7 +254,7 @@ function AppContent() {
         onClose={() => setIsChatOpen(false)}
         onDraftRequest={handleDraftFromAI}
         onCreateRequest={handleCreateFromChat}
-        onUpdateStatus={handleStatusUpdateFromChat} // Pass the handler
+        onUpdateStatus={handleStatusUpdateFromChat} 
         existingRequests={requests} 
       />
 
@@ -247,6 +275,14 @@ function AppContent() {
               onSendBack={handleSendBackRequest}
           />
       )}
+
+      {selectionRequest && (
+          <QuotationSelectionModal 
+              request={selectionRequest}
+              onClose={() => setSelectionRequest(null)}
+              onSelect={handleEmployeeSelection}
+          />
+      )}
     </Layout>
   );
 }
@@ -254,7 +290,9 @@ function AppContent() {
 function App() {
   return (
     <LanguageProvider>
-      <AppContent />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </LanguageProvider>
   );
 }

@@ -10,7 +10,7 @@ import { TravelRequest, RequestFor, TravelType, TravelPolicy } from '../types';
 import { generateJustification } from '../services/geminiService';
 import { validatePolicy, calculateMileageReimbursement, getDailyPerDiem, getHotelLimit, getApprovalFlow } from '../services/policyRules';
 import { storageService } from '../services/storage';
-import { AIRPORTS, CITIES, AIRLINES } from '../services/mockData';
+// Removed mockData import
 import { SearchableSelect } from './ui/SearchableSelect';
 import { useTravelRequestForm } from '../hooks/useTravelRequestForm';
 import { useTranslation } from '../services/translations';
@@ -38,7 +38,16 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
   // Dynamic Data State
   const [availableProjects, setAvailableProjects] = useState<any[]>([]);
   const [availableCostCenters, setAvailableCostCenters] = useState<any[]>([]);
+  
+  // Options for Selects
   const [employeeOptions, setEmployeeOptions] = useState<{value: string, label: string, subLabel: string}[]>([]);
+  const [empIdOptions, setEmpIdOptions] = useState<{value: string, label: string, subLabel: string}[]>([]);
+  const [departmentOptions, setDepartmentOptions] = useState<{value: string, label: string}[]>([]);
+  
+  // Static Reference Data State
+  const [refData, setRefData] = useState<{ airports: any[], cities: string[], airlines: string[] }>({
+      airports: [], cities: [], airlines: []
+  });
 
   // Use Custom Hook for Logic
   const {
@@ -53,26 +62,44 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
 
   const isEditMode = !!(initialData && initialData.id);
 
-  // Load Master Data (Projects, Employees, Policies)
+  // Load Master Data (Projects, Employees, Policies, Static Refs)
   useEffect(() => {
     const loadMasterData = async () => {
-        const [projs, ccs, pols, emps] = await Promise.all([
+        const [projs, ccs, pols, emps, airports, cities, airlines] = await Promise.all([
             storageService.getProjects(),
             storageService.getCostCenters(),
             storageService.getPolicies(),
-            storageService.getEmployees()
+            storageService.getEmployees(),
+            storageService.getAirports(),
+            storageService.getCities(),
+            storageService.getAirlines()
         ]);
         
         setAvailableProjects(projs);
         setAvailableCostCenters(ccs);
         setCurrentPolicy(pols);
+        setRefData({ airports, cities, airlines });
         
-        // Transform Employees for Select
+        // Transform Employees for Select (Name Search)
         setEmployeeOptions(emps.map(e => ({
             value: e.id,
             label: e.name,
             subLabel: `${e.department || 'General'} • ${e.email}`
         })));
+
+        // Transform Employees for Select (ID Search)
+        setEmpIdOptions(emps.map(e => ({
+            value: e.id,
+            label: e.id,
+            subLabel: `${e.name} • ${e.department}`
+        })));
+
+        // Extract Unique Departments from Cost Centers & Employees
+        const deptSet = new Set<string>();
+        ccs.forEach(c => deptSet.add(c.department));
+        emps.forEach(e => { if(e.department) deptSet.add(e.department); });
+        
+        setDepartmentOptions(Array.from(deptSet).map(d => ({ value: d, label: d })));
     };
     loadMasterData();
   }, []);
@@ -107,6 +134,13 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
   // Real-time Policy & DOA Check using Rule Engine
   useEffect(() => {
       const runValidation = () => {
+          // Guard: If no travelers yet (loading), skip validation to avoid undefined errors
+          if (!travelers || travelers.length === 0 || !travelers[0]) {
+              setApprovalFlow([]);
+              setPolicyFeedback(null);
+              return;
+          }
+
           let allFlags: string[] = [];
           
           // Check Flight & Hotel Rules for primary traveler
@@ -129,7 +163,10 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
           // Aggregate Cost Check
           const days = calculateDays();
           const hotelLimit = getHotelLimit(trip.destination, travelType);
-          const perDiem = getDailyPerDiem(mainTraveler, travelType, trip.destination).amount;
+          // Safe access to per diem amount
+          const perDiemInfo = getDailyPerDiem(mainTraveler, travelType, trip.destination);
+          const perDiem = perDiemInfo ? perDiemInfo.amount : 0;
+          
           const maxBudget = (hotelLimit + (travelType === 'INTERNATIONAL' ? perDiem * 34 : perDiem)) * days * travelers.length + 20000; 
           
           if (estimatedCost > maxBudget && estimatedCost > 0) {
@@ -157,11 +194,11 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
     onSubmit(request);
   };
 
-  // Options (Airports/Cities still use static ref data for UX speed)
-  const airportOptions = AIRPORTS.map(a => ({ value: a.code, label: `${a.code} - ${a.name}`, subLabel: a.city }));
-  const cityOptions = CITIES.map(c => ({ value: c, label: c }));
+  // Options Handlers
+  const airportOptions = refData.airports.map(a => ({ value: a.code, label: `${a.code} - ${a.name}`, subLabel: a.city }));
+  const cityOptions = refData.cities.map(c => ({ value: c, label: c }));
   const projectOptions = availableProjects.map(p => ({ value: p.code, label: p.code, subLabel: p.name }));
-  const airlineOptions = AIRLINES.map(a => ({ value: a, label: a }));
+  const airlineOptions = refData.airlines.map(a => ({ value: a, label: a }));
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 animate-fade-in-up pb-32">
@@ -255,17 +292,18 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                       )}
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        
+                        {/* DEPARTMENT FIELD - UPDATED TO SEARCHABLE SELECT */}
                         <div>
                              <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">
                                 {traveler.type === 'Employee' ? t('form.label.dept') : t('form.label.company')}
                              </label>
                              {traveler.type === 'Employee' ? (
-                                 <input 
-                                     type="text" 
-                                     value={traveler.department || ''} 
-                                     readOnly 
-                                     className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-600"
-                                     placeholder={t('form.label.dept')}
+                                 <SearchableSelect 
+                                    options={departmentOptions}
+                                    value={traveler.department || ''}
+                                    onChange={(val) => updateTraveler(idx, 'department', val)}
+                                    placeholder={t('form.label.dept')}
                                  />
                              ) : (
                                  <input 
@@ -278,27 +316,28 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                              )}
                         </div>
 
+                        {/* EMPLOYEE ID FIELD - UPDATED TO SEARCHABLE SELECT */}
                         {traveler.type === 'Employee' && (
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.empId')}</label>
-                                <input 
-                                    type="text" 
-                                    value={traveler.id.startsWith('NEW') || traveler.id.startsWith('AI-PAX') || traveler.id.startsWith('IMP') ? '' : traveler.id} 
-                                    readOnly 
-                                    className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-600"
-                                    placeholder="ID"
+                                <SearchableSelect 
+                                    options={empIdOptions}
+                                    value={traveler.id.startsWith('NEW') || traveler.id.startsWith('AI-PAX') || traveler.id.startsWith('IMP') ? '' : traveler.id}
+                                    onChange={(val) => selectEmployeeTraveler(idx, val)} // Auto-fills other fields
+                                    placeholder="Select ID..."
                                 />
                             </div>
                         )}
 
+                        {/* FULL NAME FIELD */}
                         <div className={`sm:col-span-2 ${traveler.type === 'Employee' ? 'lg:col-span-1' : 'lg:col-span-2'}`}>
                             <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.fullName')}</label>
-                            {requestFor === RequestFor.EMPLOYEE && traveler.type === 'Employee' ? (
+                            {traveler.type === 'Employee' ? (
                                 <SearchableSelect 
                                     options={employeeOptions}
-                                    value={traveler.id.startsWith('NEW') || traveler.id.startsWith('AI-PAX') || traveler.id.startsWith('IMP') ? '' : traveler.id}
+                                    value={traveler.id.startsWith('NEW') || traveler.id.startsWith('AI-PAX') || traveler.id.startsWith('IMP') ? '' : traveler.id} // Binds to ID but shows Name via Options
                                     onChange={(val) => selectEmployeeTraveler(idx, val)}
-                                    placeholder="Search by ID, Name..."
+                                    placeholder="Search Name..."
                                 />
                             ) : (
                                 <input 
@@ -307,7 +346,6 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                                     onChange={(e) => updateTraveler(idx, 'name', e.target.value)}
                                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-slate-900 outline-none"
                                     placeholder={t('form.label.fullName')}
-                                    disabled={requestFor === RequestFor.SELF}
                                 />
                             )}
                         </div>
@@ -416,9 +454,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
 
               {/* Purpose & Justification */}
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-2 opacity-10 pointer-events-none">
-                      <Wand2 size={120}/>
-                  </div>
+                  {/* Removed absolute background Wand2 icon */}
 
                   <div>
                       <div className="flex justify-between items-center mb-1">

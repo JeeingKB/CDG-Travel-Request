@@ -1,25 +1,31 @@
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { storageService } from './storage';
 
-let supabaseInstance: any = null;
+let supabaseInstance: SupabaseClient | null = null;
+let lastUrl = '';
+let lastKey = '';
 
-export const getSupabase = () => {
-  if (supabaseInstance) return supabaseInstance;
-
+export const getSupabase = (): SupabaseClient | null => {
   const settings = storageService.getSettings();
   const { supabaseUrl, supabaseKey } = settings.databaseConfig;
 
-  if (supabaseUrl && supabaseKey) {
-    try {
-      supabaseInstance = createClient(supabaseUrl, supabaseKey);
+  if (!supabaseUrl || !supabaseKey) return null;
+
+  // Re-initialize if config changes
+  if (supabaseInstance && lastUrl === supabaseUrl && lastKey === supabaseKey) {
       return supabaseInstance;
-    } catch (error) {
-      console.error("Failed to initialize Supabase:", error);
-      return null;
-    }
   }
-  return null;
+
+  try {
+    supabaseInstance = createClient(supabaseUrl, supabaseKey);
+    lastUrl = supabaseUrl;
+    lastKey = supabaseKey;
+    return supabaseInstance;
+  } catch (error) {
+    console.error("Failed to initialize Supabase:", error);
+    return null;
+  }
 };
 
 export const testSupabaseConnection = async (url: string, key: string) => {
@@ -27,10 +33,12 @@ export const testSupabaseConnection = async (url: string, key: string) => {
   
   try {
     const tempClient = createClient(url, key);
-    // Try to fetch 1 row from system_settings to verify read access
-    const { data, error } = await tempClient.from('system_settings').select('key').limit(1);
+    // Fetch 1 row from a table we know exists or system check
+    const { error } = await tempClient.from('system_settings').select('key').limit(1);
     
     if (error) {
+        // PGRST116 means no rows returned but query worked (which is success connection)
+        if (error.code === 'PGRST116') return { success: true, message: "Connection Successful (Empty Table)" };
         return { success: false, message: error.message };
     }
     return { success: true, message: "Connection Successful!" };

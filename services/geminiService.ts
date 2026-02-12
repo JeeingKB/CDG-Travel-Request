@@ -1,7 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { storageService } from "./storage";
-import { TravelRequest, SystemSettings, ChatActionData, TravelPolicy, AppFeature, TravelerDetails } from "../types";
+import { TravelRequest, SystemSettings, ChatActionData, TravelPolicy, AppFeature, TravelerDetails, QuotationOption, TravelServiceItem } from "../types";
 
 const TODAY = new Date().toISOString().split('T')[0];
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -95,31 +95,59 @@ export const translateContent = async (text: string, targetLanguageCode: 'th' | 
     }
 };
 
-export const parseVendorQuote = async (emailText: string): Promise<any[]> => {
+export const parseVendorQuote = async (emailText: string): Promise<QuotationOption[]> => {
     const prompt = `
-        You are an AI assistant for a Travel Agent.
-        Analyze the following email text from a vendor/agency.
-        Extract the confirmed price/cost and details for Flight, Hotel, or Car services.
+        You are an AI assistant for a Corporate Travel Agent.
+        Analyze the following email text from a travel agency/vendor.
+        The email might contain **multiple options** (e.g., Option 1: Thai Airways, Option 2: Emirates).
+        
+        Task: Extract separate quotation options.
         
         Input Email Text:
         "${emailText}"
 
-        Return a JSON Array where each object corresponds to a service found:
+        Return a JSON Array of 'QuotationOption':
         [
-            { 
-                "type": "FLIGHT" | "HOTEL" | "CAR", 
-                "actualCost": number (Extract numbers only, ignore currency symbols),
-                "detail": string (e.g., "TG600" or "Hilton Sukhumvit"),
-                "bookingReference": string (e.g., PNR or Confirm # if available)
+            {
+                "id": "gen_id_1",
+                "name": string (e.g., "Option 1: TG - Direct"),
+                "totalAmount": number (Sum of all service costs in this option),
+                "remark": string (Brief summary, e.g. "Non-refundable, includes luggage"),
+                "services": [
+                    { 
+                        "id": "gen_svc_1",
+                        "type": "FLIGHT" | "HOTEL" | "CAR", 
+                        "actualCost": number,
+                        "flightNumber": string,
+                        "hotelName": string,
+                        "bookingReference": string,
+                        "details": string
+                    }
+                ]
             }
         ]
+        
+        If only one option exists, return array with 1 element.
+        Map fields intelligently. If hotel name is found, put in 'hotelName' property of service.
     `;
 
     try {
         const text = await generateText(prompt, true, 'OCR');
         const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(cleanJson);
+        const parsed = JSON.parse(cleanJson);
+        // Ensure structure matches TS types roughly
+        return parsed.map((opt: any) => ({
+            ...opt,
+            isSelected: false,
+            services: opt.services.map((s: any) => ({
+                ...s,
+                // Ensure required ServiceBase fields
+                id: s.id || `SVC-${Math.random()}`,
+                type: s.type || 'FLIGHT' 
+            }))
+        }));
     } catch (error) {
+        console.error("Parse Quote Error:", error);
         return [];
     }
 };

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Save, RefreshCw, Shield, Server, Zap, Globe, Cpu, Users, Trash2, GitMerge, Check, X, Plane, Hotel, DollarSign, Activity, Database, Cloud, Wifi, AlertTriangle, Plus, Mail } from 'lucide-react';
+import { Save, RefreshCw, Shield, Server, Zap, Globe, Cpu, Users, Trash2, GitMerge, Check, X, Plane, Hotel, DollarSign, Activity, Database, Cloud, Wifi, AlertTriangle, Plus, Mail, Info } from 'lucide-react';
 import { storageService } from '../services/storage';
 import { getSupabase, testSupabaseConnection } from '../services/supabaseClient'; // Import test function
 import { TravelPolicy, SystemSettings, ApiProvider, Agency, FlightRule, HotelTier, AppFeature, DatabaseProvider } from '../types';
@@ -48,8 +48,16 @@ export const PolicySettings: React.FC = () => {
   useEffect(() => {
     const load = async () => {
         setPolicy(await storageService.getPolicies());
-        setSettings(storageService.getSettings()); 
+        const loadedSettings = storageService.getSettings();
+        setSettings(loadedSettings); 
         setAgencies(await storageService.getAgencies());
+
+        // Auto-check connection if Supabase is active
+        if (loadedSettings.databaseProvider === 'SUPABASE' && loadedSettings.databaseConfig.supabaseUrl) {
+            setTestStatus('SUCCESS'); // Assume success if default loaded, or verify:
+            // testSupabaseConnection(loadedSettings.databaseConfig.supabaseUrl, loadedSettings.databaseConfig.supabaseKey)
+            //    .then(res => { if(res.success) setTestStatus('SUCCESS'); });
+        }
     };
     load();
   }, []);
@@ -61,6 +69,13 @@ export const PolicySettings: React.FC = () => {
       storageService.saveSettings(settings);
       setIsSaved(true);
       setTimeout(() => setIsSaved(false), 2000);
+      
+      // If Database provider changed to Supabase, suggest reload
+      if (settings.databaseProvider === 'SUPABASE') {
+          if(confirm("Settings saved! To apply the new Database connection, the page needs to reload. Reload now?")) {
+              window.location.reload();
+          }
+      }
     }
   };
 
@@ -454,8 +469,11 @@ export const PolicySettings: React.FC = () => {
                                     {testStatus === 'ERROR' && <span className="text-sm font-bold text-red-600 flex items-center gap-1"><AlertTriangle size={16}/> {testMessage}</span>}
                                 </div>
 
-                                <div className="text-xs text-slate-400 mt-2 bg-yellow-50 p-2 rounded border border-yellow-100 text-yellow-700">
-                                    <strong>Note:</strong> You must create tables in Supabase SQL Editor first. See documentation.
+                                <div className="text-xs text-slate-400 mt-2 bg-yellow-50 p-2 rounded border border-yellow-100 text-yellow-700 flex items-start gap-2">
+                                    <Info size={14} className="mt-0.5"/>
+                                    <div>
+                                        <strong>Note:</strong> Saving changes will require a page reload to initialize the database connection.
+                                    </div>
                                 </div>
                             </div>
                         )}

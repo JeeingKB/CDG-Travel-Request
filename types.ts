@@ -16,7 +16,8 @@ export enum RequestStatus {
   DRAFT = 'Draft',
   SUBMITTED = 'Submitted', // Sent by Employee, Waiting for ADS
   QUOTATION_PENDING = 'Quotation Pending', // ADS sent email to vendor
-  PENDING_APPROVAL = 'Pending Approval', // ADS updated price, sent to Manager
+  WAITING_EMPLOYEE_SELECTION = 'Waiting Selection', // NEW: ADS sent options to Employee
+  PENDING_APPROVAL = 'Pending Approval', // Option selected, sent to Manager
   APPROVED = 'Approved',
   REJECTED = 'Rejected',
   BOOKED = 'Booked',
@@ -195,6 +196,16 @@ export interface EventService extends ServiceBase {
 
 export type TravelServiceItem = FlightService | HotelService | CarService | InsuranceService | EventService;
 
+// --- Quotation Options (New) ---
+export interface QuotationOption {
+    id: string;
+    name: string; // e.g. "Option 1: Thai Airways", "Option 2: Emirates"
+    totalAmount: number;
+    services: TravelServiceItem[]; // Detailed services for this specific option
+    isSelected: boolean;
+    remark?: string;
+}
+
 // --- Master Data ---
 export interface Project {
   code: string;
@@ -255,7 +266,7 @@ export interface TravelRequest {
   travelers: TravelerDetails[]; // List of all people traveling
   
   trip: TripSummary; // High level summary
-  services: TravelServiceItem[]; // Detailed bookings
+  services: TravelServiceItem[]; // Detailed bookings (The FINAL Selected ones)
   
   status: RequestStatus;
   
@@ -267,6 +278,7 @@ export interface TravelRequest {
   vendorQuotationSentAt?: string;
   vendorQuotationReceivedAt?: string;
   sentToAgencies?: string[]; // IDs of agencies emailed
+  quotations?: QuotationOption[]; // NEW: List of options from vendors
   
   submittedAt?: string;
   

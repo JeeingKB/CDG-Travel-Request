@@ -7,6 +7,7 @@ import {
 import { calculateSLADeadline } from '../services/slaService';
 import { getDailyPerDiem } from '../services/policyRules';
 import { storageService } from '../services/storage';
+import { useAuth } from '../contexts/AuthContext'; // NEW
 
 // Initial Empty User (Waiting for Auth/Context)
 const EMPTY_USER: TravelerDetails = {
@@ -31,8 +32,10 @@ const DEFAULT_TRIP: TripSummary = {
 };
 
 export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null) => {
+    // --- Context ---
+    const { employeeDetails } = useAuth(); // Get mapped employee details from auth
+
     // --- State ---
-    const [currentUser, setCurrentUser] = useState<TravelerDetails>(EMPTY_USER);
     const [requestFor, setRequestFor] = useState<RequestFor>(RequestFor.SELF);
     const [travelType, setTravelType] = useState<TravelType>(TravelType.DOMESTIC);
     const [travelers, setTravelers] = useState<TravelerDetails[]>([]);
@@ -47,21 +50,16 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
             const employees = await storageService.getEmployees();
             setAllEmployees(employees);
 
-            // Simulating "Get Current Logged In User"
-            // In a real app, this comes from Auth Context
-            // For now, we take the first employee from DB, or a fallback if DB is empty
-            if (employees.length > 0) {
-                setCurrentUser(employees[0]);
-                if (!initialData) setTravelers([employees[0]]);
-            } else {
-                // Fallback if no DB connection yet
-                const guest: TravelerDetails = { ...EMPTY_USER, id: 'GUEST', name: 'Guest User' };
-                setCurrentUser(guest);
-                if (!initialData) setTravelers([guest]);
+            // Set initial travelers based on logged in user
+            if (employeeDetails && !initialData) {
+                setTravelers([employeeDetails]);
+            } else if (!initialData) {
+                // Fallback safe guard
+                setTravelers([{ ...EMPTY_USER, name: 'Loading...' }]);
             }
         };
         loadContext();
-    }, []); // Only run once on mount
+    }, [employeeDetails]); 
 
     // --- Initialization with Initial Data ---
     useEffect(() => {
@@ -91,8 +89,8 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
 
     const handleRequestForChange = useCallback((val: RequestFor) => {
         setRequestFor(val);
-        if (val === RequestFor.SELF) {
-            setTravelers([currentUser]);
+        if (val === RequestFor.SELF && employeeDetails) {
+            setTravelers([employeeDetails]);
         } else {
             setTravelers([{ 
                 id: `NEW-${Date.now()}`, 
@@ -103,7 +101,7 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
                 position: 'Staff'
             }]);
         }
-    }, [currentUser]);
+    }, [employeeDetails]);
 
     // Traveler Management
     const addTraveler = useCallback(() => {
@@ -211,8 +209,8 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
 
         return {
             id,
-            requesterId: currentUser.id,
-            requesterName: currentUser.name,
+            requesterId: employeeDetails?.id || 'UNKNOWN',
+            requesterName: employeeDetails?.name || 'Unknown',
             requestFor,
             travelType,
             travelers,
@@ -235,6 +233,6 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
         estimatedCost, setEstimatedCost,
         calculateDays,
         buildRequestObject,
-        currentUser
+        currentUser: employeeDetails || EMPTY_USER
     };
 };

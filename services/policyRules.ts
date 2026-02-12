@@ -25,7 +25,7 @@ export const getDailyPerDiem = (traveler: TravelerDetails, travelType: TravelTyp
     // BUT we should refactor to use the policy object in `validatePolicy`.
     
     // Hardcoded fallback for now to prevent breaking, but `validatePolicy` below is the main engine.
-    const isHighLevel = (traveler.jobGrade || 0) >= 13;
+    const isHighLevel = (traveler?.jobGrade || 0) >= 13;
     if (travelType === TravelType.DOMESTIC) return { amount: isHighLevel ? 600 : 500, currency: 'THB' };
     
     const dest = destinationCountry.toLowerCase();
@@ -51,6 +51,8 @@ export const validatePolicy = (
     hotel?: { pricePerNight: number, location: string },
     car?: CarService
 ): string[] => {
+    if (!traveler) return [];
+
     const violations: string[] = [];
     
     // FETCH POLICY SYNC (From LocalStorage for immediate validation)
@@ -124,6 +126,8 @@ function isCabinAllowed(requested: string, allowed: string): boolean {
 }
 
 export const getApprovalFlow = (requester: TravelerDetails, totalCost: number, policy?: TravelPolicy): string[] => {
+    if (!requester) return ['Line Manager'];
+
     // Fallback if policy not passed
     let p = policy;
     if (!p) {

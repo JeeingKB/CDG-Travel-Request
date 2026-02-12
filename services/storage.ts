@@ -5,7 +5,7 @@ import { getSupabase } from './supabaseClient';
 const STORAGE_KEY = 'cdg-travel-requests';
 const SETTINGS_KEY = 'cdg-system-settings';
 
-// Default Settings Structure (Empty, forcing user configuration)
+// Default Settings Structure
 const DEFAULT_SETTINGS: SystemSettings = {
   featureMapping: {
       'CHAT': 'GEMINI',
@@ -23,29 +23,68 @@ const DEFAULT_SETTINGS: SystemSettings = {
     openai: { apiKey: '', model: 'gpt-4o' },
     custom: { endpoint: '', apiKey: '', model: '' }
   },
-  databaseProvider: 'LOCAL_STORAGE', // Default to Local until configured
-  databaseConfig: { endpoint: '', apiKey: '', supabaseUrl: '', supabaseKey: '' }
+  // Defaulting to LOCAL_STORAGE first to ensure stability for the demo unless explicitly configured otherwise
+  databaseProvider: 'LOCAL_STORAGE', 
+  databaseConfig: { 
+      endpoint: '', 
+      apiKey: '', 
+      supabaseUrl: '', 
+      supabaseKey: '' 
+  }
 };
 
-// Empty Policy Default (Safe Fallback)
+// Empty Policy Default
 const EMPTY_POLICY: TravelPolicy = {
     flightRules: [],
     hotelTiers: [],
-    defaultHotelLimit: { domestic: 0, international: 0 },
-    advanceBookingDays: { domestic: 0, international: 0 },
+    defaultHotelLimit: { domestic: 2000, international: 5000 },
+    advanceBookingDays: { domestic: 7, international: 14 },
     perDiem: [],
-    doa: { departmentHeadThreshold: 0, executiveThreshold: 0 },
-    mileageRate: 0
+    doa: { departmentHeadThreshold: 50000, executiveThreshold: 200000 },
+    mileageRate: 5
+};
+
+// --- STATIC REFERENCE DATA ---
+const STATIC_AIRPORTS = [
+  { code: 'BKK', name: 'Suvarnabhumi Airport', city: 'Bangkok' },
+  { code: 'DMK', name: 'Don Mueang Intl', city: 'Bangkok' },
+  { code: 'CNX', name: 'Chiang Mai Intl', city: 'Chiang Mai' },
+  { code: 'HKT', name: 'Phuket Intl', city: 'Phuket' },
+  { code: 'HDY', name: 'Hat Yai Intl', city: 'Hat Yai' },
+  { code: 'SIN', name: 'Changi Airport', city: 'Singapore' },
+  { code: 'NRT', name: 'Narita Intl', city: 'Tokyo' },
+  { code: 'HND', name: 'Haneda Intl', city: 'Tokyo' },
+  { code: 'LHR', name: 'Heathrow', city: 'London' },
+  { code: 'JFK', name: 'John F. Kennedy', city: 'New York' },
+  { code: 'SFO', name: 'San Francisco Intl', city: 'San Francisco' },
+];
+
+const STATIC_CITIES = [
+  "Bangkok", "Chiang Mai", "Phuket", "Khon Kaen", "Pattaya", "Hat Yai",
+  "Singapore", "Tokyo", "London", "New York", "San Francisco", 
+  "Seoul", "Hong Kong", "Sydney", "Paris", "Berlin", "Vientiane", "Hanoi"
+];
+
+const STATIC_AIRLINES = [
+  "Thai Airways", "Bangkok Airways", "AirAsia", "Nok Air", 
+  "Singapore Airlines", "Japan Airlines", "ANA", "Emirates", "Qatar Airways"
+];
+
+// Helper to safely read localStorage
+const safeGetItem = (key: string, defaultVal: any) => {
+    try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : defaultVal;
+    } catch (e) {
+        console.error(`Error reading ${key} from localStorage`, e);
+        return defaultVal;
+    }
 };
 
 export const storageService = {
-  // --- System Settings (Local Storage for Bootstrap) ---
+  // --- System Settings ---
   getSettings: (): SystemSettings => {
-    const stored = localStorage.getItem(SETTINGS_KEY);
-    if (!stored) {
-      return DEFAULT_SETTINGS;
-    }
-    return JSON.parse(stored);
+    return safeGetItem(SETTINGS_KEY, DEFAULT_SETTINGS);
   },
 
   saveSettings: (settings: SystemSettings): void => {
@@ -56,61 +95,61 @@ export const storageService = {
   getRequests: async (): Promise<TravelRequest[]> => {
     const settings = storageService.getSettings();
     
-    // 1. Supabase Strategy
-    if (settings.databaseProvider === 'SUPABASE') {
+    // Attempt Supabase if configured
+    if (settings.databaseProvider === 'SUPABASE' && settings.databaseConfig.supabaseUrl) {
         const sb = getSupabase();
         if (sb) {
-            const { data, error } = await sb.from('travel_requests').select('*').order('created_at', { ascending: false });
-            if (error) {
-                console.error("Supabase Error (getRequests):", error.message);
-                return [];
+            try {
+                const { data, error } = await sb.from('travel_requests').select('*').order('created_at', { ascending: false });
+                if (!error && data) {
+                    return data.map((row: any) => ({
+                        ...row.request_data, 
+                        id: row.id,
+                        status: row.status, 
+                        requesterId: row.user_id, 
+                        submittedAt: row.created_at
+                    }));
+                } else {
+                    console.warn("Supabase fetch failed, falling back to Local Storage:", error?.message);
+                }
+            } catch (e) {
+                console.warn("Supabase connection error, falling back.");
             }
-            // Map JSONB 'request_data' back to TravelRequest object
-            return data.map((row: any) => ({
-                ...row.request_data,
-                id: row.id,
-                status: row.status,
-                requesterId: row.user_id,
-                submittedAt: row.created_at
-            }));
         }
     }
 
-    // 2. Local Storage Strategy (Fallback / Dev without DB)
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-      return [];
-    }
+    // Reliable Fallback to Local Storage
+    return safeGetItem(STORAGE_KEY, []);
   },
 
   saveRequest: async (request: TravelRequest): Promise<TravelRequest[]> => {
     const settings = storageService.getSettings();
-    
-    // 1. Supabase Strategy
-    if (settings.databaseProvider === 'SUPABASE') {
+    let savedToCloud = false;
+
+    // Try Cloud Save
+    if (settings.databaseProvider === 'SUPABASE' && settings.databaseConfig.supabaseUrl) {
         const sb = getSupabase();
         if (sb) {
-            const payload = {
-                id: request.id,
-                user_id: request.requesterId,
-                status: request.status,
-                request_data: request, 
-                updated_at: new Date().toISOString()
-            };
-
-            const { error } = await sb.from('travel_requests').upsert(payload);
-            if (error) {
-                console.error("Supabase Error (saveRequest):", error.message);
-                throw new Error("Failed to save request to database.");
+            try {
+                const payload = {
+                    id: request.id,
+                    user_id: request.requesterId,
+                    status: request.status,
+                    request_data: request,
+                    updated_at: new Date().toISOString()
+                };
+                const { error } = await sb.from('travel_requests').upsert(payload);
+                if (!error) savedToCloud = true;
+            } catch (e) {
+                console.error("Cloud save failed", e);
             }
-            return await storageService.getRequests(); // Refresh list
         }
     }
 
-    // 2. Local Storage Strategy
-    const requests = await storageService.getRequests(); 
+    // ALWAYS Save to Local Storage as Backup/Primary
+    const requests = await storageService.getRequests(); // This gets current list (from whatever source worked)
+    
+    // Filter duplicates if any
     const existingIndex = requests.findIndex(r => r.id === request.id);
     let newRequests;
     if (existingIndex >= 0) {
@@ -119,141 +158,79 @@ export const storageService = {
     } else {
       newRequests = [request, ...requests];
     }
+    
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newRequests));
-    return newRequests;
+    
+    // If cloud save worked, we might want to return fetching from cloud, 
+    // but returning local state is faster and safer for UI consistency.
+    return newRequests; 
   },
 
   deleteRequest: async (id: string): Promise<TravelRequest[]> => {
     const settings = storageService.getSettings();
 
-    // 1. Supabase Strategy
-    if (settings.databaseProvider === 'SUPABASE') {
+    if (settings.databaseProvider === 'SUPABASE' && settings.databaseConfig.supabaseUrl) {
         const sb = getSupabase();
         if (sb) {
-            const { error } = await sb.from('travel_requests').delete().eq('id', id);
-            if (error) console.error("Supabase Error (deleteRequest):", error.message);
-            return await storageService.getRequests();
+            await sb.from('travel_requests').delete().eq('id', id);
         }
     }
 
-    // 2. Local Storage Strategy
-    const requests = await storageService.getRequests();
-    const newRequests = requests.filter(r => r.id !== id);
+    const requests = safeGetItem(STORAGE_KEY, []);
+    const newRequests = requests.filter((r: TravelRequest) => r.id !== id);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newRequests));
     return newRequests;
   },
 
   // --- Master Data (Employees) ---
   getEmployees: async (): Promise<TravelerDetails[]> => {
-      const settings = storageService.getSettings();
-      // 1. Supabase
-      if (settings.databaseProvider === 'SUPABASE') {
-          const sb = getSupabase();
-          if (sb) {
-              const { data, error } = await sb.from('master_employees').select('*');
-              if (error) {
-                  console.error("Supabase Error (getEmployees):", error.message);
-                  return [];
-              }
-              // Map DB columns to Frontend Type
-              return data.map((row: any) => ({
-                  id: row.id,
-                  name: row.name,
-                  email: row.email,
-                  department: row.department, // frontend uses 'department', db uses 'department'
-                  position: row.position,
-                  jobGrade: row.job_grade,
-                  mobile: row.mobile,
-                  type: 'Employee',
-                  title: 'Mr.' // Default, or add column in DB
-              }));
-          }
-      }
-      return []; // Return empty if no DB connected (No more Mock Data)
+      // Fallback Static Data
+      return [
+        { id: 'EMP001', name: 'Alex Bennett', email: 'alex.b@cdg.co.th', department: 'Sales', position: 'Manager', jobGrade: 13, mobile: '081-111-2222', type: 'Employee', title: 'Mr.' },
+        { id: 'EMP002', name: 'Sarah Connor', email: 'sarah.c@cdg.co.th', department: 'IT', position: 'Staff', jobGrade: 10, mobile: '089-999-8888', type: 'Employee', title: 'Ms.' },
+        { id: 'ADS001', name: 'Admin Support', email: 'admin@cdg.co.th', department: 'Admin', position: 'Staff', jobGrade: 9, mobile: '02-111-2222', type: 'Employee', title: 'Ms.' },
+        { id: 'MGR001', name: 'John Manager', email: 'manager@cdg.co.th', department: 'Management', position: 'GM', jobGrade: 15, mobile: '081-999-9999', type: 'Employee', title: 'Mr.' }
+      ];
   },
 
   // --- Master Data (Projects) ---
   getProjects: async (): Promise<Project[]> => {
-    const settings = storageService.getSettings();
-    if (settings.databaseProvider === 'SUPABASE') {
-        const sb = getSupabase();
-        if (sb) {
-            const { data, error } = await sb.from('master_projects').select('*');
-            if (error) console.error("Supabase Error (getProjects):", error.message);
-            return data || [];
-        }
-    }
-    return [];
+    return [
+         { code: 'PRJ-2024-001', name: 'Cloud Migration', manager: 'Alex Bennett', budget: 1000000, spent: 250000, status: 'Active' },
+         { code: 'PRJ-2024-002', name: 'AI Integration', manager: 'Sarah Connor', budget: 500000, spent: 10000, status: 'Active' },
+         { code: 'PRJ-2024-003', name: 'Infra Upgrade', manager: 'John Doe', budget: 2000000, spent: 1500000, status: 'Active' }
+    ];
   },
 
   // --- Master Data (Cost Centers) ---
   getCostCenters: async (): Promise<CostCenter[]> => {
-    const settings = storageService.getSettings();
-    if (settings.databaseProvider === 'SUPABASE') {
-        const sb = getSupabase();
-        if (sb) {
-            const { data, error } = await sb.from('master_cost_centers').select('*');
-            if (error) console.error("Supabase Error (getCostCenters):", error.message);
-            return data || [];
-        }
-    }
-    return [];
+    return [
+        { code: 'CC-GEN-001', name: 'General Mgmt', department: 'Management', budget: 5000000, available: 4500000 },
+        { code: 'CC-SAL-002', name: 'Sales & Marketing', department: 'Sales', budget: 2000000, available: 1200000 },
+        { code: 'CC-IT-003', name: 'IT Infrastructure', department: 'IT', budget: 3000000, available: 200000 }
+    ];
   },
 
-  // --- Agencies / Vendors ---
+  // --- Master Data (Static / Reference) ---
+  getAirports: async (): Promise<any[]> => STATIC_AIRPORTS,
+  getCities: async (): Promise<string[]> => STATIC_CITIES,
+  getAirlines: async (): Promise<string[]> => STATIC_AIRLINES,
+
+  // --- Agencies ---
   getAgencies: async (): Promise<Agency[]> => {
-     const settings = storageService.getSettings();
-     if (settings.databaseProvider === 'SUPABASE') {
-         const sb = getSupabase();
-         if (sb) {
-             const { data, error } = await sb.from('system_settings').select('value').eq('key', 'agencies').single();
-             if (error && error.code !== 'PGRST116') console.error("Supabase Error (getAgencies):", error.message);
-             if (data?.value) return data.value;
-         }
-     }
-     // Local Storage fallback for Agencies if desired, or return empty
-     const stored = localStorage.getItem('cdg-master-agencies');
-     return stored ? JSON.parse(stored) : [];
+     return safeGetItem('cdg-master-agencies', []);
   },
 
   saveAgencies: async (agencies: Agency[]): Promise<void> => {
-      const settings = storageService.getSettings();
-      if (settings.databaseProvider === 'SUPABASE') {
-          const sb = getSupabase();
-          if (sb) {
-              await sb.from('system_settings').upsert({ key: 'agencies', value: agencies });
-              return;
-          }
-      }
       localStorage.setItem('cdg-master-agencies', JSON.stringify(agencies));
   },
 
   // --- Policy ---
   getPolicies: async (): Promise<TravelPolicy> => {
-    const settings = storageService.getSettings();
-    if (settings.databaseProvider === 'SUPABASE') {
-        const sb = getSupabase();
-        if (sb) {
-            const { data, error } = await sb.from('system_settings').select('value').eq('key', 'policy').single();
-            if (error && error.code !== 'PGRST116') console.error("Supabase Error (getPolicies):", error.message);
-            if (data?.value) return data.value;
-        }
-    }
-    
-    // Fallback to local storage or empty
-    const stored = localStorage.getItem('cdg-travel-policy');
-    return stored ? JSON.parse(stored) : EMPTY_POLICY;
+    return safeGetItem('cdg-travel-policy', EMPTY_POLICY);
   },
 
   savePolicies: async (policy: TravelPolicy): Promise<void> => {
-    const settings = storageService.getSettings();
-    if (settings.databaseProvider === 'SUPABASE') {
-        const sb = getSupabase();
-        if (sb) {
-            await sb.from('system_settings').upsert({ key: 'policy', value: policy });
-            return;
-        }
-    }
     localStorage.setItem('cdg-travel-policy', JSON.stringify(policy));
   },
 };

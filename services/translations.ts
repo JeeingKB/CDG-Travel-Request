@@ -174,6 +174,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.Draft': 'ร่าง',
     'status.Submitted': 'ส่งแล้ว',
     'status.Quotation Pending': 'รอใบเสนอราคา',
+    'status.Waiting Selection': 'รอเลือก Option', // NEW
     'status.Pending Approval': 'รออนุมัติ',
     'status.Approved': 'อนุมัติแล้ว',
     'status.Rejected': 'ไม่อนุมัติ',
@@ -342,6 +343,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.Draft': 'Draft',
     'status.Submitted': 'Submitted',
     'status.Quotation Pending': 'Quotation Pending',
+    'status.Waiting Selection': 'Waiting Selection', // NEW
     'status.Pending Approval': 'Pending Approval',
     'status.Approved': 'Approved',
     'status.Rejected': 'Rejected',
@@ -510,6 +512,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.Draft': '草稿',
     'status.Submitted': '已提交',
     'status.Quotation Pending': '待报价',
+    'status.Waiting Selection': '待选择方案', // NEW
     'status.Pending Approval': '待审批',
     'status.Approved': '已批准',
     'status.Rejected': '已拒绝',

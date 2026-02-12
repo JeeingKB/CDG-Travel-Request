@@ -3,13 +3,128 @@ import React, { useState, useMemo } from 'react';
 import { 
     Plus, Plane, FileText, CheckCircle, Clock, Inbox, Mail, 
     AlertTriangle, ArrowRight, ShieldCheck, Download, Printer, 
-    FileSpreadsheet, FileJson, ChevronDown, Users, Pencil, Trash2, FileSearch
+    FileSpreadsheet, FileJson, ChevronDown, Users, Pencil, Trash2, FileSearch, MousePointerClick
 } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { TravelRequest, RequestStatus, RequestFor, UserRole } from '../types';
 import { getSLAStatus } from '../services/slaService';
 import { exportService } from '../services/exportService';
 import { useTranslation } from '../services/translations';
+
+// --- Print Components ---
+
+const PrintSingleTicket: React.FC<{ request: TravelRequest }> = ({ request }) => {
+  return (
+    <div className="p-8 border border-slate-300 max-w-3xl mx-auto font-serif bg-white text-black">
+      <div className="text-center mb-8 border-b pb-4">
+        <h1 className="text-2xl font-bold uppercase tracking-widest mb-1">Travel Request Authorization</h1>
+        <p className="text-sm text-slate-500">CDG Group - Internal Document</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-8 mb-8">
+        <div>
+          <div className="text-xs uppercase font-bold text-slate-400">Request ID</div>
+          <div className="text-lg font-mono font-bold">{request.id}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs uppercase font-bold text-slate-400">Date</div>
+          <div className="text-lg">{new Date(request.submittedAt || Date.now()).toLocaleDateString()}</div>
+        </div>
+      </div>
+
+      <div className="mb-8 p-4 bg-slate-50 border border-slate-200">
+        <h3 className="font-bold border-b border-slate-200 pb-2 mb-2">Traveler Information</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div><span className="font-bold">Name:</span> {request.requesterName}</div>
+          <div><span className="font-bold">Employee ID:</span> {request.requesterId}</div>
+          <div><span className="font-bold">Department:</span> {request.travelers[0]?.department || 'N/A'}</div>
+          <div><span className="font-bold">Cost Center:</span> {request.trip.costCenter || 'N/A'}</div>
+        </div>
+      </div>
+
+      <div className="mb-8">
+        <h3 className="font-bold border-b border-slate-200 pb-2 mb-2">Trip Details</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+          <div><span className="font-bold">Destination:</span> {request.trip.destination}</div>
+          <div><span className="font-bold">Dates:</span> {request.trip.startDate} to {request.trip.endDate}</div>
+          <div className="col-span-2"><span className="font-bold">Purpose:</span> {request.trip.purpose}</div>
+        </div>
+
+        <table className="w-full text-sm border-collapse border border-slate-200">
+          <thead>
+            <tr className="bg-slate-100">
+              <th className="border p-2 text-left">Service</th>
+              <th className="border p-2 text-left">Details</th>
+              <th className="border p-2 text-right">Cost (THB)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {request.services.map(s => (
+              <tr key={s.id}>
+                <td className="border p-2">{s.type}</td>
+                <td className="border p-2">{(s as any).flightNumber || (s as any).hotelName || 'N/A'}</td>
+                <td className="border p-2 text-right">{(s.actualCost || 0).toLocaleString()}</td>
+              </tr>
+            ))}
+            <tr className="font-bold bg-slate-50">
+              <td className="border p-2 text-right" colSpan={2}>TOTAL</td>
+              <td className="border p-2 text-right">{(request.actualCost || request.estimatedCost).toLocaleString()}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid grid-cols-3 gap-8 mt-16 text-center text-sm">
+        <div>
+          <div className="border-b border-black mb-2 h-8"></div>
+          <div>Requested By</div>
+        </div>
+        <div>
+          <div className="border-b border-black mb-2 h-8"></div>
+          <div>Approved By (Manager)</div>
+        </div>
+        <div>
+          <div className="border-b border-black mb-2 h-8"></div>
+          <div>Authorized By (Director)</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PrintSummaryReport: React.FC<{ requests: TravelRequest[], filter: string }> = ({ requests, filter }) => {
+  return (
+    <div className="p-8 max-w-full bg-white text-black">
+      <h1 className="text-2xl font-bold mb-2">Travel Request Summary Report</h1>
+      <p className="text-sm text-slate-500 mb-6">Generated on {new Date().toLocaleString()} • Filter: {filter}</p>
+
+      <table className="w-full text-xs border-collapse border border-slate-200">
+        <thead>
+          <tr className="bg-slate-100">
+            <th className="border p-2 text-left">ID</th>
+            <th className="border p-2 text-left">Requester</th>
+            <th className="border p-2 text-left">Destination</th>
+            <th className="border p-2 text-left">Dates</th>
+            <th className="border p-2 text-left">Status</th>
+            <th className="border p-2 text-right">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {requests.map(r => (
+            <tr key={r.id}>
+              <td className="border p-2 font-mono">{r.id}</td>
+              <td className="border p-2">{r.requesterName}</td>
+              <td className="border p-2">{r.trip.destination}</td>
+              <td className="border p-2">{r.trip.startDate} - {r.trip.endDate}</td>
+              <td className="border p-2">{r.status}</td>
+              <td className="border p-2 text-right">{(r.actualCost || r.estimatedCost).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 interface DashboardProps {
   onRequestNew: () => void;
@@ -32,7 +147,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [printRequest, setPrintRequest] = useState<TravelRequest | null>(null);
 
   // --- Memoized Data Logic (Performance) ---
-  const { myRequests, recentRequests, pendingApprovals, adsInbox, adsDisplayData, stats } = useMemo(() => {
+  const { myRequests, recentRequests, pendingApprovals, adsInbox, adsDisplayData, stats, waitingSelection } = useMemo(() => {
     const isEmployee = role === 'Employee';
     // Filter: My Requests
     const myReqs = requests.filter(r => r.requesterId === 'EMP001' || !isEmployee); 
@@ -44,6 +159,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     // Filter: Pending Approvals
     const pending = requests.filter(r => r.status === RequestStatus.PENDING_APPROVAL);
+
+    // Filter: Waiting Selection
+    const waiting = requests.filter(r => r.status === RequestStatus.WAITING_EMPLOYEE_SELECTION);
 
     // Filter: ADS Inbox
     const inbox = requests.filter(r => r.status === RequestStatus.SUBMITTED || r.status === RequestStatus.QUOTATION_PENDING);
@@ -67,6 +185,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         myRequests: myReqs, 
         recentRequests: recent, 
         pendingApprovals: pending, 
+        waitingSelection: waiting,
         adsInbox: inbox, 
         adsDisplayData: display,
         stats: {
@@ -121,7 +240,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         ) : (
              <>
                 <StatCard label={t('dash.stat.activeTrips')} value={stats.activeTrips.toString()} icon={Plane} color="blue" />
-                <StatCard label={t('dash.stat.approvalsWaiting')} value={pendingApprovals.length.toString()} icon={ShieldCheck} color="orange" />
+                {waitingSelection.length > 0 ? (
+                    <StatCard label="Action Required" value={waitingSelection.length.toString() + " Pending Selection"} icon={MousePointerClick} color="red" trend="Urgent" />
+                ) : (
+                    <StatCard label={t('dash.stat.approvalsWaiting')} value={pendingApprovals.length.toString()} icon={ShieldCheck} color="orange" />
+                )}
                 <StatCard label={t('dash.stat.totalSpend')} value={`฿ ${stats.spend.toLocaleString()}`} icon={FileText} color="purple" />
                 <StatCard label={t('dash.stat.slaCompliance')} value="98.5%" icon={CheckCircle} color="green" trend="+2.4%" trendUp={true} />
              </>
@@ -278,7 +401,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <tr 
                         key={req.id} 
                         onClick={() => onEdit(req)}
-                        className="hover:bg-slate-50/50 transition-colors group cursor-pointer"
+                        className="hover:bg-slate-50/50 transition-colors group cursor-pointer relative"
                     >
                     <td className="px-6 py-4 text-sm font-medium text-slate-900">
                         <span className="font-mono text-slate-500 group-hover:text-blue-600">#{req.id.slice(-6)}</span>
@@ -304,6 +427,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                         ${req.status === RequestStatus.APPROVED ? 'bg-green-100 text-green-800' : 
                             req.status === RequestStatus.PENDING_APPROVAL ? 'bg-orange-100 text-orange-800' : 
+                            req.status === RequestStatus.WAITING_EMPLOYEE_SELECTION ? 'bg-pink-100 text-pink-800 animate-pulse' :
                             req.status === RequestStatus.SUBMITTED ? 'bg-blue-100 text-blue-800' :
                             'bg-slate-100 text-slate-800'}`}>
                         {t(`status.${req.status}`)}
@@ -319,29 +443,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <span>฿ {Number(req.estimatedCost).toLocaleString()}</span>
                         )}
                     </td>
-                    <td className="px-6 py-4 text-right relative z-20">
-                        <div className="flex items-center justify-end gap-2">
+                    <td className="px-6 py-4 text-right relative z-30">
+                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                         {role === 'Manager' && req.status === RequestStatus.PENDING_APPROVAL && (
                              <button 
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); onReview?.(req); }}
-                                className="p-2 bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 rounded-lg transition-colors shadow-sm"
+                                className="p-2 bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 rounded-lg transition-colors shadow-sm relative z-30"
                                 title="Review Request"
                             >
                                 <FileSearch size={16} />
                             </button>
                         )}
+                        {req.status === RequestStatus.WAITING_EMPLOYEE_SELECTION && (
+                             <button 
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); onEdit(req); }}
+                                className="px-3 py-1 bg-pink-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-pink-700 transition-colors flex items-center gap-1 relative z-30"
+                             >
+                                 Select <span className="hidden sm:inline">Option</span>
+                             </button>
+                        )}
                         <button 
                             type="button"
                             onClick={(e) => { e.stopPropagation(); onEdit(req); }}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors relative z-30"
                         >
                             <Pencil size={16} />
                         </button>
                         <button 
                             type="button"
                             onClick={(e) => { e.stopPropagation(); onDelete(req.id); }}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors relative z-30"
                         >
                             <Trash2 size={16} />
                         </button>
@@ -357,114 +490,3 @@ export const Dashboard: React.FC<DashboardProps> = ({
     </div>
   );
 };
-
-// --- Sub-components for Printing (Clean Code: Separation) ---
-
-const PrintSingleTicket: React.FC<{ request: TravelRequest }> = ({ request }) => (
-    <div>
-        <div className="border-b-2 border-slate-900 pb-4 mb-6 flex justify-between items-start">
-                <div>
-                <h1 className="text-3xl font-bold text-slate-900">Travel Request Document</h1>
-                <p className="text-slate-500 mt-1">Official Booking Request Form</p>
-                </div>
-                <div className="text-right">
-                    <div className="text-xl font-mono font-bold text-slate-700">{request.id}</div>
-                    <div className="text-sm text-slate-400">{new Date().toLocaleDateString()}</div>
-                </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-8 mb-8">
-            <div>
-                <h3 className="text-xs font-bold text-slate-500 uppercase border-b border-slate-200 pb-1 mb-2">Requester Info</h3>
-                <div className="space-y-1 text-sm">
-                    <div className="grid grid-cols-3"><span className="text-slate-500">Name:</span> <span className="col-span-2 font-semibold">{request.requesterName}</span></div>
-                    <div className="grid grid-cols-3"><span className="text-slate-500">Employee ID:</span> <span className="col-span-2">{request.requesterId}</span></div>
-                    <div className="grid grid-cols-3"><span className="text-slate-500">For:</span> <span className="col-span-2">{request.requestFor}</span></div>
-                </div>
-            </div>
-            <div>
-                <h3 className="text-xs font-bold text-slate-500 uppercase border-b border-slate-200 pb-1 mb-2">Trip Details</h3>
-                <div className="space-y-1 text-sm">
-                    <div className="grid grid-cols-3"><span className="text-slate-500">Destination:</span> <span className="col-span-2 font-semibold">{request.trip.destination}</span></div>
-                    <div className="grid grid-cols-3"><span className="text-slate-500">Dates:</span> <span className="col-span-2">{request.trip.startDate} - {request.trip.endDate}</span></div>
-                    <div className="grid grid-cols-3"><span className="text-slate-500">Project:</span> <span className="col-span-2">{request.trip.projectCode}</span></div>
-                </div>
-            </div>
-        </div>
-
-        <div className="mb-8">
-            <h3 className="text-xs font-bold text-slate-500 uppercase border-b border-slate-200 pb-1 mb-4">Service Details & Costs</h3>
-            <table className="w-full text-sm">
-                <thead>
-                    <tr className="bg-slate-100">
-                        <th className="p-2 text-left">Type</th>
-                        <th className="p-2 text-left">Description</th>
-                        <th className="p-2 text-left">Ref</th>
-                        <th className="p-2 text-right">Cost (THB)</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {request.services.map((svc) => (
-                        <tr key={svc.id}>
-                            <td className="p-2 font-bold">{svc.type}</td>
-                            <td className="p-2">
-                                {svc.type === 'FLIGHT' && `${svc.from} - ${svc.to} (${svc.flightNumber || 'TBD'})`}
-                                {svc.type === 'HOTEL' && `${svc.hotelName || svc.location} (${svc.roomType})`}
-                                {svc.type === 'CAR' && `${svc.carType} @ ${svc.pickupLocation}`}
-                                {svc.type === 'INSURANCE' && 'Travel Insurance'}
-                            </td>
-                            <td className="p-2 font-mono">{svc.bookingReference || '-'}</td>
-                            <td className="p-2 text-right">{svc.actualCost?.toLocaleString() || '-'}</td>
-                        </tr>
-                    ))}
-                    <tr className="border-t-2 border-slate-300">
-                        <td colSpan={3} className="p-2 text-right font-bold">Total Actual Cost:</td>
-                        <td className="p-2 text-right font-bold text-lg">{request.actualCost?.toLocaleString() || '-'}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-);
-
-const PrintSummaryReport: React.FC<{ requests: TravelRequest[]; filter: string }> = ({ requests, filter }) => (
-    <div>
-        <div className="border-b-2 border-slate-900 pb-4 mb-6 flex justify-between items-end">
-            <div>
-                <h1 className="text-2xl font-bold text-slate-900">Travel Requests Report</h1>
-                <p className="text-slate-500 text-sm mt-1">Generated: {new Date().toLocaleString()}</p>
-            </div>
-            <div className="text-right">
-                <div className="text-sm font-bold text-slate-700">Filter: {filter}</div>
-                <div className="text-xs text-slate-400">Total Records: {requests.length}</div>
-            </div>
-        </div>
-
-        <table className="w-full text-sm">
-            <thead>
-                <tr className="border-b-2 border-slate-200">
-                    <th className="py-2 text-left font-bold text-slate-700">ID</th>
-                    <th className="py-2 text-left font-bold text-slate-700">Requester</th>
-                    <th className="py-2 text-left font-bold text-slate-700">Destination</th>
-                    <th className="py-2 text-left font-bold text-slate-700">Dates</th>
-                    <th className="py-2 text-left font-bold text-slate-700">Status</th>
-                    <th className="py-2 text-right font-bold text-slate-700">Est. Cost</th>
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-                {requests.map((req) => (
-                    <tr key={req.id}>
-                        <td className="py-2 font-mono text-xs">{req.id}</td>
-                        <td className="py-2">{req.requesterName}</td>
-                        <td className="py-2 font-semibold">{req.trip.destination}</td>
-                        <td className="py-2 text-xs">{req.trip.startDate} - {req.trip.endDate}</td>
-                        <td className="py-2">
-                            <span className="border border-slate-200 px-1 rounded text-xs">{req.status}</span>
-                        </td>
-                        <td className="py-2 text-right font-mono">{(req.actualCost || req.estimatedCost).toLocaleString()}</td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
-    </div>
-);
