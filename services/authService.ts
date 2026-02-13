@@ -1,21 +1,21 @@
 
 import { getSupabase } from './supabaseClient';
 import { storageService } from './storage';
-import { TravelerDetails } from '../types';
+import { TravelerDetails, UserRole } from '../types';
 
 export const authService = {
   // Sign in with Azure AD (SSO)
   signInWithAzure: async () => {
     const supabase = getSupabase();
     if (!supabase) {
-      console.warn("Supabase not configured. Using Mock Logic.");
-      return { error: { message: "Supabase URL/Key missing in settings." } };
+      console.warn("Supabase not configured.");
+      return { error: { message: "Supabase is not configured. Please log in via Mock/Demo to configure Settings, or set environment variables." } };
     }
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: {
-        scopes: 'email profile',
+        scopes: 'email profile openid offline_access', // Standard Azure scopes
         redirectTo: window.location.origin, // Redirect back to current page
       },
     });
@@ -24,20 +24,34 @@ export const authService = {
   },
 
   // Mock Login for Demo/Testing (Local Storage Mode)
-  signInMock: async (role: 'Employee' | 'Manager' | 'ADS') => {
+  signInMock: async (role: UserRole) => {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 800));
     
-    // Create a fake user session object
-    const mockUser = {
-      id: role === 'ADS' ? 'ADS001' : role === 'Manager' ? 'MGR001' : 'EMP001',
-      email: `${role.toLowerCase()}@cdg.co.th`,
-      role: role,
-      user_metadata: {
-        full_name: role === 'Employee' ? 'Alex Bennett' : role === 'Manager' ? 'Sarah Connor' : 'Admin User',
-        avatar_url: `https://ui-avatars.com/api/?name=${role}&background=random`
-      }
-    };
+    // Create a fake user session object based on role
+    let mockUser;
+    
+    switch (role) {
+        case 'ADS':
+            mockUser = { id: 'ADS001', email: 'admin@cdg.co.th', user_metadata: { full_name: 'Admin Support', avatar_url: `https://ui-avatars.com/api/?name=Admin+Support&background=random` } };
+            break;
+        case 'Manager':
+            mockUser = { id: 'MGR001', email: 'manager@cdg.co.th', user_metadata: { full_name: 'John Manager', avatar_url: `https://ui-avatars.com/api/?name=John+Manager&background=random` } };
+            break;
+        case 'President':
+            mockUser = { id: 'PRE001', email: 'president@cdg.co.th', user_metadata: { full_name: 'David President', avatar_url: `https://ui-avatars.com/api/?name=David+President&background=random` } };
+            break;
+        case 'IT_ADMIN':
+            mockUser = { id: 'IT001', email: 'it.admin@cdg.co.th', user_metadata: { full_name: 'Tech Admin', avatar_url: `https://ui-avatars.com/api/?name=Tech+Admin&background=random` } };
+            break;
+        case 'Employee':
+        default:
+             mockUser = { id: 'EMP001', email: 'alex.b@cdg.co.th', user_metadata: { full_name: 'Alex Bennett', avatar_url: `https://ui-avatars.com/api/?name=Alex+Bennett&background=random` } };
+            break;
+    }
+    
+    // Attach Role Property explicitly for mock
+    (mockUser as any).role = role;
     
     // Store in Session Storage to persist during refresh (simulating session)
     sessionStorage.setItem('cdg-mock-session', JSON.stringify(mockUser));

@@ -1,5 +1,5 @@
 
-export type UserRole = 'Employee' | 'Manager' | 'ADS';
+export type UserRole = 'Employee' | 'Manager' | 'ADS' | 'President' | 'IT_ADMIN';
 
 export enum TravelType {
   DOMESTIC = 'DOMESTIC',
@@ -52,6 +52,26 @@ export interface DatabaseConfig {
   supabaseKey?: string; // NEW
 }
 
+export interface BrandingConfig {
+    appName: string;
+    logoUrl?: string; // If empty, use default C icon
+    primaryColor: string; // Hex Code e.g. #0f172a
+    sidebarColor: string;
+}
+
+export interface DashboardConfig {
+    showStats: boolean;
+    showRecentRequests: boolean;
+    showPendingApprovals: boolean;
+    showCalendarWidget: boolean; // Future placeholder
+}
+
+export interface DocumentTemplateConfig {
+    headerText: string;
+    footerText: string;
+    showLogo: boolean;
+}
+
 export interface SystemSettings {
   // apiProvider: ApiProvider; // Removed in favor of featureMapping
   featureMapping: Record<AppFeature, ApiProvider>; // NEW: Map specific features to providers
@@ -59,6 +79,11 @@ export interface SystemSettings {
   apiConfigs: ApiConfig;
   databaseProvider: DatabaseProvider;
   databaseConfig: DatabaseConfig;
+  
+  // NEW: UI & Maintenance
+  branding: BrandingConfig;
+  dashboardConfig: DashboardConfig;
+  docTemplates: DocumentTemplateConfig;
 }
 
 // --- Agency / Vendor Interface ---
@@ -71,55 +96,67 @@ export interface Agency {
   isPreferred: boolean;
 }
 
-// --- COMPLEX POLICY INTERFACES ---
+// --- COMPLEX POLICY & DOA MATRIX INTERFACES (NEW) ---
 
-export interface FlightRule {
-  minDurationHours: number; // e.g. 0 for Short, 6 for Long
-  allowedCabin: 'Economy' | 'Premium Economy' | 'Business' | 'First';
-  applicableJobGrades: number[]; // e.g. [10, 11, 12] vs [13, 14, 15]
+export interface CompanyProfile {
+    id: string; // e.g., "CDG", "CDGS", "CDT"
+    name: string;
+    taxId?: string;
 }
 
-export interface HotelTier {
-  zoneName: string; // e.g. "Tier 1 Cities (NY, London, Tokyo)"
-  cities: string[]; // List of specific cities
-  limitPerNight: number;
-  currency: 'THB' | 'USD';
+// Generic Condition for any rule
+export interface PolicyCondition {
+    field: 'JOB_GRADE' | 'COST' | 'TRAVEL_TYPE' | 'DURATION_HOURS' | 'DESTINATION_REGION';
+    operator: 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN' | 'IN_LIST' | 'BETWEEN';
+    value: any; // 10, [10,11], "INTERNATIONAL", etc.
 }
 
-export interface PerDiemRule {
-  region: 'Domestic' | 'International_Tier1' | 'International_General';
-  amount: number;
-  currency: 'THB' | 'USD';
+// 1. Complex Flight/Hotel Rules
+export interface ComplexRule {
+    id: string;
+    companyId: string; // Multi-company support
+    category: 'FLIGHT_CLASS' | 'HOTEL_LIMIT' | 'PER_DIEM';
+    
+    // Conditions (AND logic)
+    minJobGrade?: number;
+    maxJobGrade?: number;
+    travelType?: 'DOMESTIC' | 'INTERNATIONAL' | 'ALL';
+    minDurationHours?: number; // Only for flight
+    
+    // Result
+    allowedValue: string | number; // "Business", 2000 (Limit)
+    currency?: string;
+}
+
+// 2. DOA Matrix (Approval Flow)
+export interface DOARule {
+    id: string;
+    companyId: string;
+    priority: number; // 1 check first
+    
+    // Conditions
+    minCost: number;
+    maxCost: number; // -1 for Infinity
+    travelType?: 'DOMESTIC' | 'INTERNATIONAL' | 'ALL';
+    department?: string; // Optional: Specific dept logic
+    
+    // Result: Ordered list of approver roles
+    approverChain: string[]; // ["Line Manager", "VP", "CEO"]
 }
 
 // --- Policy Configuration Interface ---
 export interface TravelPolicy {
-  // 1. Flight Policy (Complex)
-  flightRules: FlightRule[];
+  companies: CompanyProfile[];
   
-  // 2. Hotel Policy (Complex)
-  hotelTiers: HotelTier[];
+  // New Flexible Matrix
+  complexRules: ComplexRule[];
+  doaMatrix: DOARule[];
+
+  // Legacy fields (kept for backward compatibility or simple defaults)
   defaultHotelLimit: {
     domestic: number;
     international: number;
   };
-
-  // 3. Booking Rules
-  advanceBookingDays: {
-    domestic: number;
-    international: number;
-  };
-
-  // 4. Allowance
-  perDiem: PerDiemRule[];
-
-  // 5. DOA / Approval
-  doa: {
-    departmentHeadThreshold: number; // Amount that triggers Dept Head approval
-    executiveThreshold: number;      // Amount that triggers CFO/COO approval
-  };
-  
-  // 6. Mileage
   mileageRate: number; // THB per KM
 }
 
@@ -232,6 +269,7 @@ export interface TravelerDetails {
   email?: string;
   department?: string; // For Employee
   company?: string; // For Guest
+  companyId?: string; // NEW: To link with Multi-Company Policy
   mobile?: string;
   dateOfBirth?: string; // Required for flights
   passportNumber?: string; // For International
@@ -240,7 +278,7 @@ export interface TravelerDetails {
   
   // Added for Policy Logic
   jobGrade?: number; // e.g., 10, 13
-  position?: 'MD' | 'GM' | 'AMD' | 'AGM' | 'Manager' | 'Staff' | 'Other';
+  position?: 'MD' | 'GM' | 'AMD' | 'AGM' | 'Manager' | 'Staff' | 'President' | 'Admin' | 'Other';
 }
 
 // --- Main Request ---

@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { authService } from '../services/authService';
 import { getSupabase } from '../services/supabaseClient';
-import { TravelerDetails } from '../types';
+import { TravelerDetails, UserRole } from '../types';
 import { storageService } from '../services/storage';
 
 interface User {
@@ -19,10 +19,10 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  userRole: 'Employee' | 'Manager' | 'ADS'; // Derived role
+  userRole: UserRole; // Derived role
   employeeDetails: TravelerDetails | null; // Mapped employee data
   signInWithAzure: () => Promise<void>;
-  signInMock: (role: 'Employee' | 'Manager' | 'ADS') => Promise<void>;
+  signInMock: (role: UserRole) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -34,7 +34,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [employeeDetails, setEmployeeDetails] = useState<TravelerDetails | null>(null);
   
   // Default to Employee, but logic can upgrade this based on email or metadata
-  const [userRole, setUserRole] = useState<'Employee' | 'Manager' | 'ADS'>('Employee');
+  const [userRole, setUserRole] = useState<UserRole>('Employee');
 
   const mapUserToEmployee = async (u: User) => {
       // Logic to find employee details from DB based on email
@@ -43,8 +43,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       if (match) {
           setEmployeeDetails(match);
-          // Simple role logic for demo
-          if (match.department === 'Management' || match.position.includes('Manager')) setUserRole('Manager');
+          // Auto-derive role from master data position if not explicitly mocked
+          if (match.position === 'President') setUserRole('President');
+          else if (match.position === 'Admin') setUserRole('IT_ADMIN'); // Specific for IT Admin mock
+          else if (match.department === 'Admin') setUserRole('ADS');
+          else if (match.department === 'Management' || match.position.includes('Manager')) setUserRole('Manager');
       } else {
           // Fallback if not found in master data
           setEmployeeDetails({
@@ -59,7 +62,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
       }
 
-      // Check for Mock Role override
+      // Check for Mock Role override (Takes precedence)
       if (u.role) {
           setUserRole(u.role as any);
       }
@@ -99,7 +102,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await authService.signInWithAzure();
   };
 
-  const signInMock = async (role: any) => {
+  const signInMock = async (role: UserRole) => {
       setIsLoading(true);
       const res = await authService.signInMock(role);
       if (res.data?.user) {

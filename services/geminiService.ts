@@ -202,25 +202,45 @@ export const parseTravelIntent = async (
         ? `User: ${userContext.name} (ID: ${userContext.id}, Dept: ${userContext.department || 'N/A'})`
         : `User: Anonymous`;
 
+    // Updated Prompt to be more aggressive about CREATION
     const prompt = `
-      You are "CDG Travel Buddy". ${contextStr}. Today: ${TODAY}.
-      User Existing Requests: ${JSON.stringify(requestsSummary)}
+      You are "CDG Travel Buddy", an efficient corporate travel assistant. 
+      ${contextStr}. Today is ${TODAY}.
+      
       User Input: "${userInput}"
       
-      Instructions:
-      1. Analyze intent: CREATE_REQUEST, CHECK_STATUS, GENERAL_CHAT, or UPDATE_STATUS.
-      2. Respond in language: "${language}".
-      3. If creating request, extract trip details (dest, dates, purpose).
-      4. If checking status, look at Existing Requests to find matches.
-      5. Keep response helpful and concise.
+      TASK:
+      Analyze the user's input and extract structured data to perform an action.
+      
+      RULES:
+      1. **CREATE_REQUEST**: If the user mentions a destination or intent to travel (e.g., "go to Chiang Mai", "book flight to Tokyo", "trip to London next week", "จองตั๋วไปภูเก็ต"), YOU MUST set intent to "CREATE_REQUEST".
+         - Extract 'destination', 'startDate', 'endDate', 'purpose'.
+         - If specific dates aren't given, assume 'startDate' is tomorrow (${TODAY} + 1 day) and 'endDate' is 2 days later.
+         - 'travelType': 'INTERNATIONAL' if outside Thailand, else 'DOMESTIC'.
+         - 'estimatedCost': Estimate a realistic cost in THB (e.g. 5000 for domestic, 50000 for intl).
+         - **CRITICAL**: Return the data in the 'travelRequest' object structure shown below. Do NOT just ask for more info; create a draft first.
+      
+      2. **CHECK_STATUS**: If user asks about existing requests (e.g. "status of Tokyo", "is my trip approved?").
+         - Search 'User Existing Requests': ${JSON.stringify(requestsSummary)}
+         - Set intent to "CHECK_STATUS" and put matching IDs in 'statusResults'.
 
-      Return JSON:
+      3. **GENERAL_CHAT**: Only use this if the input is completely unrelated to travel booking or status (e.g. "Hello", "Who are you").
+
+      RESPONSE FORMAT (JSON ONLY):
       {
         "intent": "CREATE_REQUEST" | "CHECK_STATUS" | "GENERAL_CHAT" | "UPDATE_STATUS",
-        "travelRequest": { ... } | null,
-        "conversationalResponse": string,
-        "statusResults": [ID_LIST_STRINGS], 
-        "statusUpdate": { "requestId": "ID", "status": "Approved/Rejected" }
+        "conversationalResponse": "Short polite text in ${language} summarizing what you are doing (e.g. 'I have drafted a request for Tokyo...')",
+        "travelRequest": {
+            "trip": {
+                "destination": "String (Required)",
+                "startDate": "YYYY-MM-DD",
+                "endDate": "YYYY-MM-DD",
+                "purpose": "String"
+            },
+            "travelType": "DOMESTIC" | "INTERNATIONAL",
+            "estimatedCost": Number
+        },
+        "statusResults": ["ID1", "ID2"]
       }
     `;
 
@@ -235,6 +255,7 @@ export const parseTravelIntent = async (
 
     return result as IntentResult;
   } catch (error) {
+    console.error("Intent Parsing Error:", error);
     return {
         intent: "GENERAL_CHAT",
         conversationalResponse: `System Error: ${(error as Error).message}`

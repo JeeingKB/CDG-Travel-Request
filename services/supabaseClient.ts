@@ -6,9 +6,17 @@ let supabaseInstance: SupabaseClient | null = null;
 let lastUrl = '';
 let lastKey = '';
 
+// Check for Environment Variables (Supports Vite, Next.js, CRA patterns)
+const ENV_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const ENV_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+
 export const getSupabase = (): SupabaseClient | null => {
   const settings = storageService.getSettings();
-  const { supabaseUrl, supabaseKey } = settings.databaseConfig;
+  
+  // 1. Try Settings (User Configured via UI)
+  // 2. Try Environment Variables (Build Configured)
+  const supabaseUrl = settings.databaseConfig.supabaseUrl || ENV_URL;
+  const supabaseKey = settings.databaseConfig.supabaseKey || ENV_KEY;
 
   if (!supabaseUrl || !supabaseKey) return null;
 
@@ -33,12 +41,11 @@ export const testSupabaseConnection = async (url: string, key: string) => {
   
   try {
     const tempClient = createClient(url, key);
-    // Fetch 1 row from a table we know exists or system check
-    const { error } = await tempClient.from('system_settings').select('key').limit(1);
+    // Try to get session to verify connectivity
+    const { error } = await tempClient.auth.getSession();
     
     if (error) {
-        // PGRST116 means no rows returned but query worked (which is success connection)
-        if (error.code === 'PGRST116') return { success: true, message: "Connection Successful (Empty Table)" };
+        // Some errors imply connection worked but auth failed, which is fine for 'connectivity check'
         return { success: false, message: error.message };
     }
     return { success: true, message: "Connection Successful!" };

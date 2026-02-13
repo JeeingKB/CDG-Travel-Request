@@ -648,7 +648,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
             <div className="space-y-6 animate-fade-in">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('form.label.project')} <span className="text-red-500">*</span></label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('form.label.project')}</label>
                       <SearchableSelect 
                          options={projectOptions}
                          value={trip.projectCode}

@@ -1,15 +1,10 @@
 
-import { TravelType, TravelerDetails, FlightService, CarService, TravelPolicy } from '../types';
+import { TravelType, TravelerDetails, FlightService, CarService, TravelPolicy, DOARule, ComplexRule } from '../types';
 import { storageService } from './storage';
-
-// --- Helper: Get Current Policy (Synchronously for Rule Logic) ---
-// Note: In a real app, we might pass policy as an argument, but for simplicity we fetch from local state or updated storage
-// For now, let's assume the caller passes the policy, OR we fetch default.
 
 export const calculateMileageReimbursement = (distanceKm: number): number => {
     // 1 - 100 km : 9 THB/km
     // > 100 km : 4.5 THB/km
-    // NOTE: This could be dynamic based on policy.mileageRate if passed
     if (distanceKm <= 100) {
         return distanceKm * 9;
     } else {
@@ -20,11 +15,7 @@ export const calculateMileageReimbursement = (distanceKm: number): number => {
 };
 
 export const getDailyPerDiem = (traveler: TravelerDetails, travelType: TravelType, destinationCountry: string): { amount: number, currency: string } => {
-    // In a real implementation, we would query the `policy.perDiem` array.
-    // Since this function is sync and called by UI, we will fallback to hardcoded logic if policy isn't passed,
-    // BUT we should refactor to use the policy object in `validatePolicy`.
-    
-    // Hardcoded fallback for now to prevent breaking, but `validatePolicy` below is the main engine.
+    // Ideally, check `complexRules` here too, but keeping simple fallback
     const isHighLevel = (traveler?.jobGrade || 0) >= 13;
     if (travelType === TravelType.DOMESTIC) return { amount: isHighLevel ? 600 : 500, currency: 'THB' };
     
@@ -36,12 +27,29 @@ export const getDailyPerDiem = (traveler: TravelerDetails, travelType: TravelTyp
 };
 
 export const getHotelLimit = (destinationCity: string, travelType: TravelType): number => {
-    // This is just a helper for the Form's initial estimate.
-    // Real validation happens in `validatePolicy` with full Policy object.
     return travelType === TravelType.DOMESTIC ? 2000 : 5000;
 };
 
-// --- CORE VALIDATION ENGINE ---
+// --- HELPER: MATCH RULE ---
+// Check if a complex rule applies to the current traveler/trip
+const isRuleApplicable = (rule: ComplexRule, traveler: TravelerDetails, tripDuration: number, tripType: TravelType): boolean => {
+    // 1. Company Check
+    if (rule.companyId !== 'ALL' && rule.companyId !== traveler.companyId) return false;
+
+    // 2. Grade Check
+    if (rule.minJobGrade !== undefined && (traveler.jobGrade || 0) < rule.minJobGrade) return false;
+    if (rule.maxJobGrade !== undefined && (traveler.jobGrade || 0) > rule.maxJobGrade) return false;
+
+    // 3. Travel Type Check
+    if (rule.travelType && rule.travelType !== 'ALL' && rule.travelType !== tripType) return false;
+
+    // 4. Duration Check (Only for flights)
+    if (rule.minDurationHours !== undefined && tripDuration < rule.minDurationHours) return false;
+
+    return true;
+};
+
+// --- CORE VALIDATION ENGINE (MATRIX SUPPORT) ---
 
 export const validatePolicy = (
     travelType: TravelType,
@@ -55,62 +63,61 @@ export const validatePolicy = (
 
     const violations: string[] = [];
     
-    // FETCH POLICY SYNC (From LocalStorage for immediate validation)
-    // Ideally passed as prop, but direct fetch is acceptable for this scale
+    // FETCH POLICY SYNC
     const settingsStr = localStorage.getItem('cdg-travel-policy');
     if (!settingsStr) return [];
     const policy: TravelPolicy = JSON.parse(settingsStr);
 
-    const jobGrade = traveler.jobGrade || 10;
+    const companyId = traveler.companyId || 'CDG'; // Default if missing
 
     // 1. FLIGHT VALIDATION
     if (flight) {
-        // Find applicable rule
-        // Rules are usually: If grade >= X AND duration > Y -> Cabin Allowed
         const duration = flight.durationHours || 0;
         
-        // Check for specific rule permitting this cabin
-        const allowedRule = policy.flightRules.find(r => 
-            r.applicableJobGrades.includes(jobGrade) && 
-            duration >= r.minDurationHours && 
-            isCabinAllowed(flight.flightClass, r.allowedCabin)
+        // Find ALL applicable rules for FLIGHT_CLASS matching this traveler
+        // Sort by specific conditions? (Usually highest grade rule wins)
+        const rules = policy.complexRules.filter(r => 
+            r.category === 'FLIGHT_CLASS' && 
+            isRuleApplicable(r, traveler, duration, travelType)
         );
 
-        if (!allowedRule) {
-            // If no rule explicitly allows this, it might be a violation
-            // Check if they are booking higher than Economy
-            if (flight.flightClass !== 'Economy') {
-                 // Check if ANY rule for this grade allows this cabin
-                 const anyRuleForGrade = policy.flightRules.some(r => r.applicableJobGrades.includes(jobGrade) && r.allowedCabin === flight.flightClass);
-                 if (!anyRuleForGrade) {
-                     violations.push(`Job Grade ${jobGrade} is not eligible for ${flight.flightClass} class.`);
-                 } else {
-                     // Grade allows it, but maybe duration is too short?
-                     violations.push(`${flight.flightClass} only allowed for flights > 6 hours (Current: ${duration}h).`);
-                 }
-            }
+        // Logic: If NO rule matches, default to Economy.
+        // If rules match, take the "best" allowed class (assuming Business > Eco).
+        // OR simply: If user requested X, is there a rule allowing X?
+        
+        const requestedClass = flight.flightClass;
+        
+        // Is there a rule explicitly allowing this class (or better)?
+        const isAllowed = rules.some(r => isCabinAllowed(requestedClass, r.allowedValue as string));
+        
+        // Fallback: If no rules found, assume Economy is allowed only.
+        const effectiveAllowed = rules.length > 0 ? 'See Rules' : 'Economy';
+
+        if (rules.length === 0 && requestedClass !== 'Economy') {
+             violations.push(`No policy found allowing ${requestedClass} for your grade/company. Default is Economy.`);
+        } else if (rules.length > 0 && !isAllowed) {
+             violations.push(`Policy does not permit ${requestedClass}. (Allowed: ${rules.map(r => r.allowedValue).join(' or ')})`);
         }
     }
 
     // 2. HOTEL VALIDATION
     if (hotel) {
+        // Find applicable HOTEL_LIMIT rules
+        const rules = policy.complexRules.filter(r => 
+            r.category === 'HOTEL_LIMIT' && 
+            isRuleApplicable(r, traveler, 0, travelType)
+        );
+
         let limit = travelType === 'DOMESTIC' ? policy.defaultHotelLimit.domestic : policy.defaultHotelLimit.international;
         
-        // Check for Specific City Tiers
-        const tier = policy.hotelTiers.find(t => t.cities.some(c => hotel.location.includes(c)));
-        if (tier) {
-            limit = tier.limitPerNight;
+        // Override with specific rule if found
+        if (rules.length > 0) {
+            // Take the max limit if multiple rules apply? Or the first? Let's take first match.
+            limit = Number(rules[0].allowedValue);
         }
 
         if (hotel.pricePerNight > limit) {
-             violations.push(`Hotel limit for ${hotel.location} is ${limit} ${tier ? tier.currency : 'THB'}. (Requested: ${hotel.pricePerNight})`);
-        }
-    }
-
-    // 3. MILEAGE
-    if (car && car.mileageDistance) {
-        if (car.mileageDistance > 800) {
-            violations.push('Mileage claim > 800km. Please consider flight.');
+             violations.push(`Hotel limit for ${companyId}/${travelType} is ${limit}. (Requested: ${hotel.pricePerNight})`);
         }
     }
 
@@ -125,6 +132,8 @@ function isCabinAllowed(requested: string, allowed: string): boolean {
     return reqIdx <= allowIdx; // Requested must be <= Allowed
 }
 
+// --- DOA MATRIX ENGINE ---
+
 export const getApprovalFlow = (requester: TravelerDetails, totalCost: number, policy?: TravelPolicy): string[] => {
     if (!requester) return ['Line Manager'];
 
@@ -135,20 +144,27 @@ export const getApprovalFlow = (requester: TravelerDetails, totalCost: number, p
         if (str) p = JSON.parse(str);
     }
     
-    const deptHeadLimit = p?.doa?.departmentHeadThreshold ?? 50000;
-    const execLimit = p?.doa?.executiveThreshold ?? 200000;
+    if (!p || !p.doaMatrix) return ['Line Manager'];
 
-    const flow = ['Line Manager'];
-
-    // Level 2 Approval
-    if (totalCost > deptHeadLimit) {
-        flow.push('Department Head');
-    }
+    const companyId = requester.companyId || 'CDG';
     
-    // Level 3 Approval (C-Level)
-    if (totalCost > execLimit || requester.position === 'GM') {
-        flow.push('CFO / COO');
+    // Filter rules for this company
+    // Then find the matching cost range
+    // Sort by priority (if multiple match, lower priority # wins/first match wins)
+    const applicableRule = p.doaMatrix
+        .filter(r => r.companyId === companyId)
+        .filter(r => {
+            // Check Cost Range
+            if (totalCost < r.minCost) return false;
+            if (r.maxCost !== -1 && totalCost > r.maxCost) return false;
+            return true;
+        })
+        .sort((a, b) => a.priority - b.priority)[0]; // Get top priority match
+
+    if (applicableRule) {
+        return applicableRule.approverChain;
     }
 
-    return flow;
+    // Default fallback if no matrix match found
+    return ['Line Manager', 'Admin Verification']; 
 };

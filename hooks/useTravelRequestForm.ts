@@ -204,7 +204,7 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
     // Submission Construction
     const buildRequestObject = (
         id: string,
-        status: RequestStatus = RequestStatus.PENDING_APPROVAL, 
+        status: RequestStatus = RequestStatus.SUBMITTED, 
         policyFlags: string[] = []
     ): TravelRequest => {
         const submissionTime = new Date().toISOString();

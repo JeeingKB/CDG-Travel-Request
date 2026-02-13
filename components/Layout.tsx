@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { LayoutDashboard, PlusCircle, Settings, LogOut, Bell, UserCircle, List, Globe, ChevronDown, Check, User as UserIcon, Building, Phone } from 'lucide-react';
 import { useTranslation, Language } from '../services/translations';
 import { useAuth } from '../contexts/AuthContext';
+import { storageService } from '../services/storage'; // To get branding settings
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -12,17 +13,19 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate }) => {
   const { t, language, setLanguage } = useTranslation();
-  const { user, userRole, employeeDetails, signOut } = useAuth(); // Get auth data
+  const { user, userRole, employeeDetails, signOut } = useAuth(); 
   
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotifyOpen, setIsNotifyOpen] = useState(false);
+  
+  // Branding State
+  const [branding, setBranding] = useState(storageService.getSettings().branding);
 
   const langMenuRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const notifyMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (langMenuRef.current && !langMenuRef.current.contains(event.target as Node)) setIsLangMenuOpen(false);
@@ -30,14 +33,19 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate
       if (notifyMenuRef.current && !notifyMenuRef.current.contains(event.target as Node)) setIsNotifyOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    // Reload branding when view changes (in case settings updated)
+    const currentSettings = storageService.getSettings();
+    setBranding(currentSettings.branding);
 
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [activeView]);
+
+  // Dynamic Menu Items based on Role
   const menuItems = [
-    { id: 'DASHBOARD', icon: LayoutDashboard, label: t('dashboard') },
-    { id: 'NEW_REQUEST', icon: PlusCircle, label: t('new_request') },
-    { id: 'MY_REQUESTS', icon: List, label: t('my_requests') },
-    { id: 'SETTINGS', icon: Settings, label: t('settings') },
+    { id: 'DASHBOARD', icon: LayoutDashboard, label: t('dashboard'), hidden: false },
+    { id: 'NEW_REQUEST', icon: PlusCircle, label: t('new_request'), hidden: userRole === 'ADS' || userRole === 'IT_ADMIN' }, // Admins usually process, not req
+    { id: 'MY_REQUESTS', icon: List, label: t('my_requests'), hidden: userRole === 'IT_ADMIN' },
+    { id: 'SETTINGS', icon: Settings, label: t('settings'), hidden: !['ADS', 'IT_ADMIN'].includes(userRole) }, // Only Admins
   ];
 
   const languages: { code: Language; label: string; flag: string }[] = [
@@ -48,7 +56,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate
 
   const currentLang = languages.find(l => l.code === language);
 
-  // --- Notification Logic ---
   const [notifications, setNotifications] = useState([
       { id: 1, title: 'Request Approved', desc: 'Your trip to Tokyo has been approved.', time: '2h ago', unread: true },
       { id: 2, title: 'Quotation Received', desc: 'Vendor sent 3 options for Singapore.', time: '5h ago', unread: true },
@@ -62,33 +69,45 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate
   };
 
   const handleNotificationClick = (id: number) => {
-      // Mark specific as read
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, unread: false } : n));
-      // Close dropdown
       setIsNotifyOpen(false);
-      // Navigate to My Requests (assuming notifications are mostly about requests)
       onNavigate('MY_REQUESTS');
   };
 
   return (
     <div className="flex min-h-screen bg-[#f8fafc]">
-      {/* Sidebar - Hidden on Print */}
+      {/* Dynamic Style for Primary Color */}
+      <style>{`
+          :root {
+              --primary-color: ${branding.primaryColor || '#0f172a'};
+          }
+          .bg-primary { background-color: var(--primary-color) !important; }
+          .text-primary { color: var(--primary-color) !important; }
+          .border-primary { border-color: var(--primary-color) !important; }
+          .hover-bg-primary:hover { background-color: var(--primary-color) !important; }
+      `}</style>
+
+      {/* Sidebar */}
       <aside className="w-20 lg:w-72 bg-white border-r border-slate-100 flex flex-col fixed h-full z-20 transition-all duration-300 print:hidden shadow-sm">
         <div className="p-6 flex items-center gap-3">
-          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center shrink-0 shadow-md shadow-slate-300">
-            <span className="text-white font-bold text-xl">C</span>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-md shadow-slate-300 bg-primary">
+            {branding.logoUrl ? (
+                <img src={branding.logoUrl} alt="Logo" className="w-6 h-6 object-contain"/>
+            ) : (
+                <span className="text-white font-bold text-xl">{branding.appName.charAt(0)}</span>
+            )}
           </div>
-          <span className="font-bold text-lg text-slate-800 hidden lg:block tracking-tight">{t('app.title')}</span>
+          <span className="font-bold text-lg text-slate-800 hidden lg:block tracking-tight">{branding.appName}</span>
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-2">
-          {menuItems.map((item) => (
+          {menuItems.filter(item => !item.hidden).map((item) => (
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group relative overflow-hidden
                 ${activeView === item.id 
-                  ? 'bg-slate-900 text-white shadow-lg shadow-slate-300' 
+                  ? 'bg-primary text-white shadow-lg shadow-slate-300' 
                   : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
             >
               <item.icon size={22} className={`relative z-10 ${activeView === item.id ? 'text-white' : 'text-slate-400 group-hover:text-slate-900'}`} />
@@ -102,23 +121,26 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="text-xs font-bold text-slate-400 uppercase mb-1">Current Role</div>
                 <div className="font-bold text-slate-800 flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${userRole === 'ADS' ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
-                    {userRole}
+                    <div className={`w-2 h-2 rounded-full 
+                        ${userRole === 'ADS' ? 'bg-purple-500' : 
+                          userRole === 'IT_ADMIN' ? 'bg-red-500' : 
+                          userRole === 'President' ? 'bg-yellow-500' : 
+                          userRole === 'Manager' ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
+                    {userRole.replace('_', ' ')}
                 </div>
             </div>
         </div>
       </aside>
 
-      {/* Main Content - No Margin on Print */}
+      {/* Main Content */}
       <main className="flex-1 ml-20 lg:ml-72 transition-all duration-300 print:ml-0 print:w-full">
-        {/* Top Header - Hidden on Print - Increased z-index to 40 */}
+        {/* Top Header */}
         <header className="h-16 bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100 px-8 flex items-center justify-between print:hidden">
           <div className="text-sm text-slate-400 font-medium hidden sm:block">
             {new Date().toLocaleDateString(language === 'th' ? 'th-TH' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </div>
           
           <div className="flex items-center gap-4 ml-auto sm:ml-0">
-            
             {/* Language Dropdown */}
             <div className="relative" ref={langMenuRef}>
                 <button 
@@ -202,17 +224,17 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate
                     className="flex items-center gap-3 group focus:outline-none"
                 >
                     <div className="text-right hidden sm:block">
-                        <div className="text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
+                        <div className="text-sm font-bold text-slate-800 group-hover:text-primary transition-colors">
                             {employeeDetails?.name || user?.user_metadata?.full_name || 'User'}
                         </div>
                         <div className="text-xs text-slate-500 flex items-center justify-end gap-1">
-                            {userRole}
+                            {userRole.replace('_', ' ')}
                         </div>
                     </div>
                     {user?.user_metadata?.avatar_url ? (
                         <img 
                             src={user.user_metadata.avatar_url} 
-                            className={`w-9 h-9 rounded-full border-2 transition-colors ${isProfileOpen ? 'border-blue-500 shadow-md' : 'border-slate-200 group-hover:border-blue-300'}`} 
+                            className={`w-9 h-9 rounded-full border-2 transition-colors ${isProfileOpen ? 'border-primary shadow-md' : 'border-slate-200 group-hover:border-blue-300'}`} 
                             alt="Avatar"
                         />
                     ) : (
