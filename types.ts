@@ -72,6 +72,106 @@ export interface DocumentTemplateConfig {
     showLogo: boolean;
 }
 
+// --- 2. Dynamic Form Builder ---
+export interface FormField {
+    id: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'dropdown' | 'checkbox' | 'file';
+    required: boolean;
+    conditional?: {
+        fieldId: string;
+        value: string;
+    }; // Show only if other field matches value
+    options?: string[]; // For dropdown
+    validation?: {
+        min?: number;
+        max?: number;
+        regex?: string;
+    };
+    order: number;
+    active: boolean;
+}
+
+// --- 3. Workflow & Approval ---
+export interface WorkflowStep {
+    id: string;
+    name: string;
+    approverRole: UserRole | 'LineManager' | 'DepartmentHead' | 'CFO' | 'HR';
+    condition?: {
+        field: 'totalCost' | 'travelType' | 'destinationZone';
+        operator: '>' | '<' | '==' | 'IN';
+        value: any;
+    };
+    slaHours: number;
+}
+
+// --- 6. Notification Templates ---
+export interface NotificationTemplate {
+    id: string;
+    event: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'QUOTATION' | 'ADVANCE_CLEARANCE';
+    channel: 'EMAIL' | 'LINE' | 'SMS';
+    subject?: string;
+    body: string; // Supports {{name}}, {{id}} variables
+    active: boolean;
+}
+
+// --- 9. Feature Toggle ---
+export interface FeatureToggle {
+    id: string;
+    name: string;
+    key: string;
+    enabled: boolean;
+    description?: string;
+}
+
+// --- 8. Audit Log ---
+export interface AuditLog {
+    id: string;
+    timestamp: string;
+    user: string;
+    action: string;
+    module: string;
+    details: string;
+}
+
+// --- NEW: ADVANCED POLICY MODULES ---
+
+// 1. Zones & Per Diem
+export interface Zone {
+    id: string;
+    name: string; // e.g. "Zone A (ASEAN)"
+    countries: string[]; // ["Thailand", "Vietnam"]
+    currency: string;
+    perDiem: number;
+}
+
+// 2. Expense Categories
+export interface ExpenseCategory {
+    id: string;
+    name: string; // e.g. "Airfare", "Taxi"
+    requiresReceipt: boolean;
+    dailyLimit?: number;
+    allowCashAdvance: boolean;
+    active: boolean;
+}
+
+// 3. Cash Advance
+export interface CashAdvancePolicy {
+    maxPercentage: number; // e.g. 80%
+    clearanceDays: number; // e.g. 7 days
+}
+
+// 4. Budget Control
+export interface BudgetRule {
+    id: string;
+    scope: 'DEPARTMENT' | 'PROJECT';
+    targetId: string; // Dept Code or Project Code
+    amount: number;
+    period: 'YEARLY' | 'PROJECT_LIFETIME';
+    alertThreshold: number; // % e.g. 90
+    spent: number; // Current spend
+}
+
 export interface SystemSettings {
   // apiProvider: ApiProvider; // Removed in favor of featureMapping
   featureMapping: Record<AppFeature, ApiProvider>; // NEW: Map specific features to providers
@@ -84,6 +184,18 @@ export interface SystemSettings {
   branding: BrandingConfig;
   dashboardConfig: DashboardConfig;
   docTemplates: DocumentTemplateConfig;
+
+  // Enterprise Configs (New)
+  dynamicForms?: FormField[];
+  workflows?: WorkflowStep[];
+  notificationTemplates?: NotificationTemplate[];
+  featureToggles?: FeatureToggle[];
+  systemParams?: {
+      taxRate: number;
+      currency: string;
+      dateFormat: string;
+      runningNumberPrefix: string;
+  };
 }
 
 // --- Agency / Vendor Interface ---
@@ -111,7 +223,7 @@ export interface PolicyCondition {
     value: any; // 10, [10,11], "INTERNATIONAL", etc.
 }
 
-// 1. Complex Flight/Hotel Rules
+// 1. Complex Flight/Hotel Rules (Matrix)
 export interface ComplexRule {
     id: string;
     companyId: string; // Multi-company support
@@ -148,9 +260,15 @@ export interface DOARule {
 export interface TravelPolicy {
   companies: CompanyProfile[];
   
-  // New Flexible Matrix
+  // Matrix Rules
   complexRules: ComplexRule[];
   doaMatrix: DOARule[];
+
+  // Advanced Modules
+  zones: Zone[];
+  expenseCategories: ExpenseCategory[];
+  cashAdvance: CashAdvancePolicy;
+  budgetRules: BudgetRule[];
 
   // Legacy fields (kept for backward compatibility or simple defaults)
   defaultHotelLimit: {
@@ -278,7 +396,7 @@ export interface TravelerDetails {
   
   // Added for Policy Logic
   jobGrade?: number; // e.g., 10, 13
-  position?: 'MD' | 'GM' | 'AMD' | 'AGM' | 'Manager' | 'Staff' | 'President' | 'Admin' | 'Other';
+  position?: 'MD' | 'GM' | 'AMD' | 'AGM' | 'Manager' | 'Staff' | 'President' | 'CEO' | 'ADS' | 'Admin' | 'Other';
 }
 
 // --- Main Request ---

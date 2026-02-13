@@ -6,8 +6,9 @@ import { getApprovalFlow } from '../services/policyRules';
 import { ChatMessage, TravelRequest, TravelType, RequestStatus, TravelerDetails } from '../types';
 import { useTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
-import { formatCurrency, formatDate } from '../utils/formatters'; // Shared
-import { getStatusStyle } from '../utils/styleHelpers'; // Shared
+import { formatCurrency, formatDate } from '../utils/formatters'; 
+import { getStatusStyle } from '../utils/styleHelpers'; 
+import { useAuth } from '../contexts/AuthContext';
 
 interface ChatAssistantProps {
   isOpen: boolean;
@@ -21,6 +22,8 @@ interface ChatAssistantProps {
 
 export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, onClose, onDraftRequest, onCreateRequest, onUpdateStatus, existingRequests }) => {
   const { t, language } = useTranslation();
+  const { employeeDetails } = useAuth(); // Use actual auth context
+  
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
@@ -115,11 +118,10 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, on
     setIsLoading(true);
 
     try {
-      // Get User Context
-      const employees = await storageService.getEmployees();
-      const currentUser: TravelerDetails = employees[0] || { 
+      // Use logged in user details, or fallback to guest if not available
+      const currentUser: TravelerDetails = employeeDetails || { 
         id: 'GUEST', 
-        name: 'Guest', 
+        name: 'Guest User', 
         department: 'General',
         title: 'Mr.',
         type: 'Guest'
@@ -149,7 +151,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({ isOpen, onOpen, on
              action = 'DRAFT_CREATED';
              
              // Dynamic User Simulation for DOA Check in Chat
-             const estCost = draftData.estimatedCost || 20000;
+             const estCost = draftData.estimatedCost || 0; // Default to 0 if null
              const type = draftData.travelType || TravelType.DOMESTIC;
              const doa = getApprovalFlow(currentUser as any, estCost);
              let policyStatus = 'Pass';

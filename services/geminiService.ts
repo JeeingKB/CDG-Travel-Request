@@ -198,38 +198,44 @@ export const parseTravelIntent = async (
       id: r.id, destination: r.trip.destination, status: r.status, date: r.submittedAt
     }));
 
-    const contextStr = userContext 
-        ? `User: ${userContext.name} (ID: ${userContext.id}, Dept: ${userContext.department || 'N/A'})`
-        : `User: Anonymous`;
-
-    // Updated Prompt to be more aggressive about CREATION
+    // Updated Prompt to fix user issues:
+    // 1. Travelers: Default to userContext if not specified.
+    // 2. Cost: Do NOT guess. Set to 0 if not mentioned.
+    // 3. Purpose: Do NOT copy input. Extract short topic or leave empty.
     const prompt = `
       You are "CDG Travel Buddy", an efficient corporate travel assistant. 
-      ${contextStr}. Today is ${TODAY}.
+      Today is ${TODAY}.
       
+      Current User Profile: ${JSON.stringify(userContext || { name: 'Employee', id: 'EMP' })}
       User Input: "${userInput}"
       
       TASK:
       Analyze the user's input and extract structured data to perform an action.
       
-      RULES:
-      1. **CREATE_REQUEST**: If the user mentions a destination or intent to travel (e.g., "go to Chiang Mai", "book flight to Tokyo", "trip to London next week", "จองตั๋วไปภูเก็ต"), YOU MUST set intent to "CREATE_REQUEST".
-         - Extract 'destination', 'startDate', 'endDate', 'purpose'.
-         - If specific dates aren't given, assume 'startDate' is tomorrow (${TODAY} + 1 day) and 'endDate' is 2 days later.
-         - 'travelType': 'INTERNATIONAL' if outside Thailand, else 'DOMESTIC'.
-         - 'estimatedCost': Estimate a realistic cost in THB (e.g. 5000 for domestic, 50000 for intl).
-         - **CRITICAL**: Return the data in the 'travelRequest' object structure shown below. Do NOT just ask for more info; create a draft first.
+      RULES for "CREATE_REQUEST":
+      1. **Travelers**: 
+         - If the user explicitly mentions a name (e.g. "for Sarah"), use that.
+         - **DEFAULT**: If NO specific person is named, YOU MUST use the "Current User Profile" details to populate the 'travelers' array. This is the most common case (Request for Self).
       
-      2. **CHECK_STATUS**: If user asks about existing requests (e.g. "status of Tokyo", "is my trip approved?").
-         - Search 'User Existing Requests': ${JSON.stringify(requestsSummary)}
-         - Set intent to "CHECK_STATUS" and put matching IDs in 'statusResults'.
+      2. **Purpose**:
+         - Extract a short, specific business purpose (e.g., "Client Meeting", "Site Visit", "Seminar").
+         - If the input is vague or just a command (e.g. "book flight to Japan"), return an empty string "" for purpose.
+         - **DO NOT** copy the entire user input string into the purpose field.
 
-      3. **GENERAL_CHAT**: Only use this if the input is completely unrelated to travel booking or status (e.g. "Hello", "Who are you").
+      3. **Cost (estimatedCost)**:
+         - **ONLY** set this if the user explicitly states a budget (e.g. "budget 20k", "cost 5000").
+         - Otherwise, set 'estimatedCost' to 0. Do NOT guess or estimate prices.
+
+      4. **Dates**:
+         - If specific dates aren't given, assume 'startDate' is tomorrow (${TODAY} + 1 day) and 'endDate' is 2 days later.
+
+      5. **Travel Type**:
+         - 'travelType': 'INTERNATIONAL' if outside Thailand, else 'DOMESTIC'.
 
       RESPONSE FORMAT (JSON ONLY):
       {
         "intent": "CREATE_REQUEST" | "CHECK_STATUS" | "GENERAL_CHAT" | "UPDATE_STATUS",
-        "conversationalResponse": "Short polite text in ${language} summarizing what you are doing (e.g. 'I have drafted a request for Tokyo...')",
+        "conversationalResponse": "Short polite text in ${language} summarizing what you are doing.",
         "travelRequest": {
             "trip": {
                 "destination": "String (Required)",
@@ -237,6 +243,7 @@ export const parseTravelIntent = async (
                 "endDate": "YYYY-MM-DD",
                 "purpose": "String"
             },
+            "travelers": [ { "id": "...", "name": "...", "type": "Employee" } ],
             "travelType": "DOMESTIC" | "INTERNATIONAL",
             "estimatedCost": Number
         },
