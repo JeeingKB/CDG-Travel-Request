@@ -232,7 +232,7 @@ export const useTravelRequestForm = (initialData?: Partial<TravelRequest> | null
         travelType, setTravelType,
         travelers, addTraveler, updateTraveler, removeTraveler, selectEmployeeTraveler,
         trip, setTrip, handleTripChange,
-        services, addService, removeService, updateService,
+        services, setServices, addService, removeService, updateService,
         estimatedCost, setEstimatedCost,
         calculateDays,
         buildRequestObject,

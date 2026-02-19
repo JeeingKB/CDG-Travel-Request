@@ -1,8 +1,9 @@
-
 import React, { useState } from 'react';
-import { X, Check, XCircle, CornerUpLeft, Calendar, MapPin, DollarSign } from 'lucide-react';
-import { TravelRequest } from '../types';
-import { formatCurrency, formatDate } from '../utils/formatters'; // Shared
+import { X, Check, XCircle, CornerUpLeft, Calendar, MapPin, DollarSign, UserCheck, Clock } from 'lucide-react';
+import { TravelRequest, ApprovalLog } from '../types';
+import { formatCurrency, formatDate } from '../utils/formatters';
+import { useAuth } from '../contexts/AuthContext';
+import { workflowService } from '../services/workflowService';
 
 interface ApprovalModalProps {
   request: TravelRequest;
@@ -13,14 +14,29 @@ interface ApprovalModalProps {
 }
 
 export const ApprovalModal: React.FC<ApprovalModalProps> = ({ request, onClose, onApprove, onReject, onSendBack }) => {
+    const { employeeDetails } = useAuth();
     const [reason, setReason] = useState('');
     const [action, setAction] = useState<'REJECT' | 'SENDBACK' | null>(null);
 
-    const handleConfirmAction = () => {
+    // --- Workflow Logic Wrappers ---
+    const handleApprove = () => {
+        if (!employeeDetails) return;
+        // In a real scenario, approval might not need comments, or we could add a comment field.
+        // Assuming workflowService handles the logic.
+        const updated = workflowService.approveRequest(request, employeeDetails);
+        onApprove(updated);
+    };
+
+    const handleConfirmRejectSendBack = () => {
+        if (!employeeDetails) return;
         if (action === 'REJECT') {
-            onReject(request, reason);
+            // Note: rejectRequest usually returns the updated request
+            const updated = workflowService.rejectRequest(request, employeeDetails, reason);
+            onReject(updated, reason);
         } else if (action === 'SENDBACK') {
-            onSendBack(request, reason);
+            // Note: sendBackRequest usually returns the updated request
+            const updated = workflowService.sendBackRequest(request, employeeDetails, reason);
+            onSendBack(updated, reason);
         }
         onClose();
     };
@@ -67,6 +83,36 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({ request, onClose, 
                         </div>
                     </div>
 
+                    {/* Approval Chain Status */}
+                    {request.requiredApprovalChain && (
+                        <div className="mb-6">
+                            <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                                <UserCheck size={16}/> Approval Chain
+                            </h3>
+                            <div className="flex items-center gap-2 text-xs">
+                                {request.requiredApprovalChain.map((role, idx) => {
+                                    const isPassed = (request.approvalHistory || []).some(h => h.role.includes(role) || idx < (request.requiredApprovalChain?.indexOf(request.currentApproverRole || '') || 0));
+                                    const isCurrent = request.currentApproverRole === role;
+                                    
+                                    return (
+                                        <div key={idx} className="flex items-center gap-2">
+                                            <div className={`px-3 py-1.5 rounded-full border font-bold flex items-center gap-1
+                                                ${isPassed ? 'bg-green-100 text-green-700 border-green-200' : 
+                                                  isCurrent ? 'bg-blue-100 text-blue-700 border-blue-200 ring-2 ring-blue-100' : 
+                                                  'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                                                {isPassed && <Check size={12}/>}
+                                                {role}
+                                            </div>
+                                            {idx < (request.requiredApprovalChain?.length || 0) - 1 && (
+                                                <div className="h-0.5 w-4 bg-slate-200"></div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Policy Flags */}
                     {request.policyFlags && request.policyFlags.length > 0 && (
                         <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl">
@@ -81,6 +127,28 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({ request, onClose, 
                                     <strong>Exception Reason:</strong> {request.policyExceptionReason}
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {/* Audit History (Approvals) */}
+                    {request.approvalHistory && request.approvalHistory.length > 0 && (
+                        <div className="mb-6">
+                            <h3 className="text-sm font-bold text-slate-700 mb-2">Approval History</h3>
+                            <div className="space-y-2">
+                                {request.approvalHistory.map(log => (
+                                    <div key={log.id} className="flex gap-3 text-xs bg-slate-50 p-2 rounded-lg">
+                                        <div className="font-bold text-slate-700 w-24">{new Date(log.timestamp).toLocaleDateString()}</div>
+                                        <div className="flex-1">
+                                            <span className="font-bold">{log.approverName}</span> 
+                                            <span className="text-slate-500"> ({log.role}) </span>
+                                            <span className={`font-bold ${log.action === 'APPROVED' ? 'text-green-600' : 'text-red-600'}`}>
+                                                {log.action}
+                                            </span>
+                                            {log.comments && <div className="text-slate-500 italic mt-1">"{log.comments}"</div>}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
 
@@ -119,7 +187,7 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({ request, onClose, 
                                 <XCircle size={18}/> Decline
                             </button>
                             <button 
-                                onClick={() => onApprove(request)}
+                                onClick={handleApprove}
                                 className="px-6 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 flex items-center gap-2 shadow-lg shadow-green-200"
                             >
                                 <Check size={18}/> Approve
@@ -134,7 +202,7 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({ request, onClose, 
                                 Cancel
                             </button>
                              <button 
-                                onClick={handleConfirmAction}
+                                onClick={handleConfirmRejectSendBack}
                                 disabled={!reason.trim()}
                                 className="px-6 py-2 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 flex items-center gap-2 disabled:opacity-50"
                             >

@@ -1,5 +1,4 @@
-
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { authService } from '../services/authService';
 import { getSupabase } from '../services/supabaseClient';
 import { TravelerDetails, UserRole } from '../types';
@@ -20,18 +19,50 @@ interface AuthContextType {
   isLoading: boolean;
   userRole: UserRole; // Derived role
   employeeDetails: TravelerDetails | null; // Mapped employee data
-  signInWithAzure: () => Promise<void>;
+  signInWithAzure: () => Promise<any>;
   signInMock: (role: UserRole) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 Minutes
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [employeeDetails, setEmployeeDetails] = useState<TravelerDetails | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('Employee');
+  
+  // Session Timeout Refs
+  // Using ReturnType<typeof setTimeout> to handle both Node and Browser environments safely
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const resetIdleTimer = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (user) {
+          idleTimerRef.current = setTimeout(() => {
+              console.warn("Session expired due to inactivity.");
+              signOut();
+              alert("Session expired due to inactivity. Please log in again.");
+          }, IDLE_TIMEOUT_MS);
+      }
+  };
+
+  useEffect(() => {
+      // Activity Listeners
+      const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+      const handleActivity = () => resetIdleTimer();
+      
+      events.forEach(e => window.addEventListener(e, handleActivity));
+      
+      if (user) resetIdleTimer();
+
+      return () => {
+          events.forEach(e => window.removeEventListener(e, handleActivity));
+          if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      };
+  }, [user]);
 
   // Core Logic: Determine Role from Data
   const mapUserToEmployee = async (u: User) => {
@@ -104,7 +135,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const signInWithAzure = async () => {
-      await authService.signInWithAzure();
+      return await authService.signInWithAzure();
   };
 
   const signInMock = async (roleHint: UserRole) => {
@@ -123,6 +154,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(null);
       setEmployeeDetails(null);
       setUserRole('Employee');
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
   };
 
   return (

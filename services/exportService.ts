@@ -1,6 +1,5 @@
 
-
-import { TravelRequest, TravelerDetails } from '../types';
+import { TravelRequest, TravelerDetails, TravelType, RequestStatus, ServiceType } from '../types';
 
 export const exportService = {
   downloadFile: (content: string, fileName: string, contentType: string) => {
@@ -78,6 +77,130 @@ export const exportService = {
       const example = ["Mr.", "John Doe", "EMP999", "Sales", "10", "Staff", "1990-01-01", "A1234567", "2030-01-01"];
       const content = [headers.join(","), example.join(",")].join("\n");
       exportService.downloadFile("\uFEFF" + content, "traveler_import_template.csv", 'text/csv;charset=utf-8;');
+  },
+
+  downloadRequestTemplate: () => {
+      // Detailed CSV structure with Field Types aligned with NewRequestForm
+      const headers = [
+          "RequesterID [String]", 
+          "TravelType [DOMESTIC/INTERNATIONAL]", 
+          "RequestFor [SELF/EMPLOYEE/CLIENT]", 
+          "Origin [City/Airport]", 
+          "Destination [City/Airport]", 
+          "StartDate [YYYY-MM-DD]", 
+          "EndDate [YYYY-MM-DD]", 
+          "Purpose [String]", 
+          "Justification [String]", 
+          "BillableTo [String]", 
+          "ProjectCode [String]", 
+          "CostCenter [String]", 
+          "EstCost [Number]",
+          "ServiceType [FLIGHT/HOTEL/CAR]",
+          "ServiceDetail [String]"
+      ];
+      const example = [
+          "EMP001", 
+          "DOMESTIC",
+          "SELF", 
+          "Bangkok", 
+          "Phuket", 
+          new Date().toISOString().split('T')[0], 
+          new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0], 
+          "Site Survey", 
+          "Annual site inspection required for compliance.",
+          "Client A",
+          "PRJ-2024-001", 
+          "CC-GEN-001", 
+          "5000",
+          "FLIGHT",
+          "Morning flight preferred"
+      ];
+      const content = [headers.join(","), example.join(",")].join("\n");
+      exportService.downloadFile("\uFEFF" + content, "request_import_template_v3.csv", 'text/csv;charset=utf-8;');
+  },
+
+  parseRequestCSV: async (file: File): Promise<Partial<TravelRequest>[]> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              const text = e.target?.result as string;
+              if (!text) {
+                  resolve([]);
+                  return;
+              }
+
+              const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
+              // Check/Remove Header (detect if first line contains brackets which indicates our template)
+              if (lines.length > 0 && lines[0].toLowerCase().includes('requesterid')) {
+                  lines.shift();
+              }
+
+              const requests: Partial<TravelRequest>[] = lines.map((line, index) => {
+                  // Basic CSV split
+                  const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+                  
+                  // Map columns to Request Object based on new template v3
+                  // 0:RequesterID, 1:TravelType, 2:RequestFor, 3:Origin, 4:Destination, 5:Start, 6:End, 
+                  // 7:Purpose, 8:Justification, 9:BillableTo, 10:Project, 11:CostCenter, 12:Cost, 13:SvcType, 14:SvcDetail
+                  
+                  const travelType = cols[1]?.toUpperCase() === 'INTERNATIONAL' ? 'INTERNATIONAL' : 'DOMESTIC';
+                  const requestFor = ['EMPLOYEE', 'CLIENT'].includes(cols[2]?.toUpperCase()) ? cols[2].toUpperCase() : 'SELF';
+
+                  // Construct Services if provided
+                  const services = [];
+                  if (cols[13]) {
+                      const svcType = cols[13].toUpperCase().trim();
+                      const svcDetail = cols[14] || '';
+                      
+                      // Basic mapping for creating a service stub
+                      let newService: any = {
+                          id: `IMP-SVC-${index}`,
+                          type: svcType as ServiceType,
+                          assignedTravelerIds: [], // Default to all
+                      };
+
+                      if (svcType === 'FLIGHT') {
+                          newService = { ...newService, from: cols[3], to: cols[4], departureDate: cols[5], airlinePreference: svcDetail };
+                      } else if (svcType === 'HOTEL') {
+                          newService = { ...newService, location: cols[4], checkIn: cols[5], checkOut: cols[6], hotelName: svcDetail };
+                      } else {
+                          newService = { ...newService, notes: svcDetail };
+                      }
+                      
+                      // Only add if type is valid
+                      if (['FLIGHT', 'HOTEL', 'CAR', 'TRAIN', 'BUS', 'INSURANCE', 'EVENT'].includes(svcType)) {
+                          services.push(newService);
+                      }
+                  }
+
+                  return {
+                      // Temporary ID
+                      id: `IMP-${Date.now()}-${index}`, 
+                      requesterId: cols[0] || 'UNKNOWN',
+                      travelType: travelType as TravelType,
+                      requestFor: requestFor as any,
+                      status: RequestStatus.DRAFT, 
+                      estimatedCost: parseFloat(cols[12]) || 0,
+                      trip: {
+                          origin: cols[3] || 'Bangkok',
+                          destination: cols[4] || 'Unknown',
+                          startDate: cols[5] || new Date().toISOString().split('T')[0],
+                          endDate: cols[6] || new Date().toISOString().split('T')[0],
+                          purpose: cols[7] || 'Imported Request',
+                          justification: cols[8] || 'Imported via Bulk CSV',
+                          billableTo: cols[9] || '',
+                          projectCode: cols[10] || '',
+                          costCenter: cols[11] || ''
+                      },
+                      travelers: [], // Will be filled by system using requesterId
+                      services: services
+                  } as Partial<TravelRequest>;
+              });
+              resolve(requests);
+          };
+          reader.onerror = (e) => reject(e);
+          reader.readAsText(file);
+      });
   },
 
   parseTravelerCSV: async (file: File): Promise<TravelerDetails[]> => {

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Plane, Hotel, Car, Shield, Ticket, HelpCircle } from 'lucide-react';
+import { Plane, Hotel, Car, Shield, Ticket, HelpCircle, Train, Bus } from 'lucide-react';
 import { ServiceType } from '../../types';
 
 interface ServiceIconProps {
@@ -24,6 +24,10 @@ export const ServiceIcon: React.FC<ServiceIconProps> = ({ type, className = '', 
       return <Shield size={size} className={className} />;
     case 'EVENT': 
       return <Ticket size={size} className={className} />;
+    case 'TRAIN':
+      return <Train size={size} className={className} />;
+    case 'BUS':
+      return <Bus size={size} className={className} />;
     default: 
       return <HelpCircle size={size} className={className} />;
   }

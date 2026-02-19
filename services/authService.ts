@@ -39,8 +39,8 @@ export const authService = {
             mockUser = { id: 'ADS001', email: 'admin@cdg.co.th', user_metadata: { full_name: 'Admin Support', avatar_url: `https://ui-avatars.com/api/?name=Admin+Support&background=random` } };
             break;
         case 'Manager':
-            // Corresponds to MGR001
-            mockUser = { id: 'MGR001', email: 'manager@cdg.co.th', user_metadata: { full_name: 'John Manager', avatar_url: `https://ui-avatars.com/api/?name=John+Manager&background=random` } };
+            // Corresponds to MGR001 - Distinct Manager Profile
+            mockUser = { id: 'MGR001', email: 'alex.mgr@cdg.co.th', user_metadata: { full_name: 'Alex Manager', avatar_url: `https://ui-avatars.com/api/?name=Alex+Manager&background=random` } };
             break;
         case 'President':
             // Corresponds to PRE001
@@ -52,8 +52,8 @@ export const authService = {
             break;
         case 'Employee':
         default:
-             // Corresponds to EMP001
-             mockUser = { id: 'EMP001', email: 'alex.b@cdg.co.th', user_metadata: { full_name: 'Alex Bennett', avatar_url: `https://ui-avatars.com/api/?name=Alex+Bennett&background=random` } };
+             // Corresponds to EMP001 - Distinct Employee Profile
+             mockUser = { id: 'EMP001', email: 'sarah.staff@cdg.co.th', user_metadata: { full_name: 'Sarah Staff', avatar_url: `https://ui-avatars.com/api/?name=Sarah+Staff&background=random` } };
             break;
     }
     

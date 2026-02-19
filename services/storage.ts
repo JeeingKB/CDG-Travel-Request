@@ -2,7 +2,7 @@
 import { TravelRequest, Project, CostCenter, TravelPolicy, SystemSettings, Agency, TravelerDetails, CompanyProfile, Zone, ExpenseCategory, BudgetRule, AuditLog } from '../types';
 import { getSupabase } from './supabaseClient';
 
-const STORAGE_KEY = 'cdg-travel-requests';
+const STORAGE_KEY = 'cdg-travel-requests-v2'; // Bumped version to ensure clean slate if needed, or consistency
 const SETTINGS_KEY = 'cdg-system-settings';
 const AUDIT_KEY = 'cdg-audit-logs';
 
@@ -28,12 +28,13 @@ const DEFAULT_SETTINGS: SystemSettings = {
     openai: { apiKey: '', model: 'gpt-4o' },
     custom: { endpoint: '', apiKey: '', model: '' }
   },
-  databaseProvider: (ENV_URL && ENV_KEY) ? 'SUPABASE' : 'LOCAL_STORAGE', 
+  // Default to LOCAL_STORAGE for robustness unless explicitly configured correctly
+  databaseProvider: (ENV_URL && ENV_KEY && ENV_URL.includes('supabase')) ? 'SUPABASE' : 'LOCAL_STORAGE', 
   databaseConfig: { 
       endpoint: '', 
       apiKey: '', 
-      supabaseUrl: '', 
-      supabaseKey: '' 
+      supabaseUrl: ENV_URL, 
+      supabaseKey: ENV_KEY 
   },
   branding: {
       appName: 'CDG Travel Portal',
@@ -81,21 +82,17 @@ const DEFAULT_SETTINGS: SystemSettings = {
   }
 };
 
-// --- INIT COMPANIES ---
+// --- INIT DATA (Keep same as before) ---
 const INIT_COMPANIES: CompanyProfile[] = [
     { id: 'CDG', name: 'Control Data (Thailand) Ltd' },
     { id: 'CDGS', name: 'CDG Systems Ltd' },
     { id: 'CDT', name: 'Computer Peripherals and Supplies Ltd' }
 ];
-
-// --- INIT ZONES ---
 const INIT_ZONES: Zone[] = [
     { id: 'Z1', name: 'Zone A (ASEAN)', countries: ['Thailand', 'Vietnam', 'Singapore', 'Malaysia', 'Laos', 'Cambodia'], currency: 'USD', perDiem: 50 },
     { id: 'Z2', name: 'Zone B (Asia Pacific)', countries: ['Japan', 'China', 'Korea', 'Australia', 'Taiwan'], currency: 'USD', perDiem: 75 },
     { id: 'Z3', name: 'Zone C (Europe/US)', countries: ['USA', 'UK', 'France', 'Germany', 'Italy', 'Spain', 'Netherlands', 'Switzerland', 'Sweden', 'Norway', 'Denmark', 'Finland', 'Belgium', 'Austria', 'Portugal', 'Canada'], currency: 'USD', perDiem: 100 }
 ];
-
-// --- INIT EXPENSE CATEGORIES ---
 const INIT_EXPENSES: ExpenseCategory[] = [
     { id: 'E1', name: 'Airfare', requiresReceipt: true, allowCashAdvance: true, active: true },
     { id: 'E2', name: 'Hotel', requiresReceipt: true, dailyLimit: 3000, allowCashAdvance: true, active: true },
@@ -103,128 +100,68 @@ const INIT_EXPENSES: ExpenseCategory[] = [
     { id: 'E4', name: 'Meals (Per Diem)', requiresReceipt: false, allowCashAdvance: true, active: true },
     { id: 'E5', name: 'Entertainment', requiresReceipt: true, dailyLimit: 5000, allowCashAdvance: false, active: true }
 ];
-
-// --- INIT BUDGET RULES ---
 const INIT_BUDGETS: BudgetRule[] = [
     { id: 'B1', scope: 'DEPARTMENT', targetId: 'CC-SAL-002', amount: 2000000, spent: 1200000, period: 'YEARLY', alertThreshold: 80 },
     { id: 'B2', scope: 'PROJECT', targetId: 'PRJ-2024-001', amount: 1000000, spent: 250000, period: 'PROJECT_LIFETIME', alertThreshold: 90 }
 ];
-
-// --- INIT POLICY (Complex) ---
 const INIT_POLICY: TravelPolicy = {
     companies: INIT_COMPANIES,
-    
-    // New Advanced Modules
     zones: INIT_ZONES,
     expenseCategories: INIT_EXPENSES,
     cashAdvance: { maxPercentage: 80, clearanceDays: 15 },
     budgetRules: INIT_BUDGETS,
-
-    // Simple defaults
     defaultHotelLimit: { domestic: 2000, international: 5000 },
     mileageRate: 5,
-
-    // Complex Matrix Rules
     complexRules: [
-        // CDG: Grade 13+ can fly Business if > 6 hours
-        {
-            id: 'R1', companyId: 'CDG', category: 'FLIGHT_CLASS',
-            minJobGrade: 13, minDurationHours: 6, travelType: 'INTERNATIONAL',
-            allowedValue: 'Business'
-        },
-        // CDG: Everyone else Economy
-        {
-            id: 'R2', companyId: 'CDG', category: 'FLIGHT_CLASS',
-            minJobGrade: 0, maxJobGrade: 12, travelType: 'ALL',
-            allowedValue: 'Economy'
-        },
-        // CDGS: Special Hotel Limit
-        {
-            id: 'R3', companyId: 'CDGS', category: 'HOTEL_LIMIT',
-            travelType: 'DOMESTIC', allowedValue: 1500, currency: 'THB'
-        }
+        { id: 'R1', companyId: 'CDG', category: 'FLIGHT_CLASS', minJobGrade: 13, minDurationHours: 6, travelType: 'INTERNATIONAL', allowedValue: 'Business' },
+        { id: 'R2', companyId: 'CDG', category: 'FLIGHT_CLASS', minJobGrade: 0, maxJobGrade: 12, travelType: 'ALL', allowedValue: 'Economy' },
+        { id: 'R3', companyId: 'CDGS', category: 'HOTEL_LIMIT', travelType: 'DOMESTIC', allowedValue: 1500, currency: 'THB' }
     ],
-
-    // DOA Matrix
     doaMatrix: [
-        // CDG Rules
-        {
-            id: 'D1', companyId: 'CDG', priority: 1,
-            minCost: 0, maxCost: 50000, travelType: 'ALL',
-            approverChain: ['Line Manager']
-        },
-        {
-            id: 'D2', companyId: 'CDG', priority: 2,
-            minCost: 50001, maxCost: 200000, travelType: 'ALL',
-            approverChain: ['Line Manager', 'Department Head']
-        },
-        {
-            id: 'D3', companyId: 'CDG', priority: 3,
-            minCost: 200001, maxCost: -1, travelType: 'ALL',
-            approverChain: ['Line Manager', 'Department Head', 'CFO']
-        },
-        
-        // CDGS Rules (Different Thresholds)
-        {
-            id: 'D4', companyId: 'CDGS', priority: 1,
-            minCost: 0, maxCost: 30000, travelType: 'ALL',
-            approverChain: ['Line Manager']
-        },
-        {
-            id: 'D5', companyId: 'CDGS', priority: 2,
-            minCost: 30001, maxCost: -1, travelType: 'ALL',
-            approverChain: ['Line Manager', 'GM']
-        }
+        { id: 'D1', companyId: 'CDG', priority: 1, minCost: 0, maxCost: 50000, travelType: 'ALL', approverChain: ['Line Manager'] },
+        { id: 'D2', companyId: 'CDG', priority: 2, minCost: 50001, maxCost: 200000, travelType: 'ALL', approverChain: ['Line Manager', 'Department Head'] },
+        { id: 'D3', companyId: 'CDG', priority: 3, minCost: 200001, maxCost: -1, travelType: 'ALL', approverChain: ['Line Manager', 'Department Head', 'CFO'] },
+        { id: 'D4', companyId: 'CDGS', priority: 1, minCost: 0, maxCost: 30000, travelType: 'ALL', approverChain: ['Line Manager'] },
+        { id: 'D5', companyId: 'CDGS', priority: 2, minCost: 30001, maxCost: -1, travelType: 'ALL', approverChain: ['Line Manager', 'GM'] }
     ]
 };
-
-// ... (Employees, Projects, CostCenters, Static Data remain unchanged) ...
-// --- STATIC REFERENCE DATA (For Initialization Only) ---
 const INIT_EMPLOYEES: TravelerDetails[] = [
-    { id: 'EMP001', name: 'Alex Bennett', email: 'alex.b@cdg.co.th', department: 'Sales', companyId: 'CDG', position: 'Manager', jobGrade: 13, mobile: '081-111-2222', type: 'Employee', title: 'Mr.' },
-    { id: 'EMP002', name: 'Sarah Connor', email: 'sarah.c@cdg.co.th', department: 'IT', companyId: 'CDGS', position: 'Staff', jobGrade: 10, mobile: '089-999-8888', type: 'Employee', title: 'Ms.' },
-    { id: 'ADS001', name: 'Admin Support', email: 'admin@cdg.co.th', department: 'Admin', companyId: 'CDG', position: 'Staff', jobGrade: 9, mobile: '02-111-2222', type: 'Employee', title: 'Ms.' },
-    { id: 'MGR001', name: 'John Manager', email: 'manager@cdg.co.th', department: 'Management', companyId: 'CDG', position: 'GM', jobGrade: 15, mobile: '081-999-9999', type: 'Employee', title: 'Mr.' },
+    { id: 'EMP001', name: 'Sarah Staff', email: 'sarah.staff@cdg.co.th', department: 'Sales', companyId: 'CDG', position: 'Staff', jobGrade: 9, mobile: '089-111-1111', type: 'Employee', title: 'Ms.' },
+    { id: 'MGR001', name: 'Alex Manager', email: 'alex.mgr@cdg.co.th', department: 'Sales', companyId: 'CDG', position: 'Manager', jobGrade: 13, mobile: '081-222-2222', type: 'Employee', title: 'Mr.' },
+    { id: 'ADS001', name: 'Admin Support', email: 'admin@cdg.co.th', department: 'Admin', companyId: 'CDG', position: 'ADS', jobGrade: 9, mobile: '02-111-2222', type: 'Employee', title: 'Ms.' },
     { id: 'PRE001', name: 'David President', email: 'president@cdg.co.th', department: 'Executive', companyId: 'CDG', position: 'President', jobGrade: 20, mobile: '081-999-0000', type: 'Employee', title: 'Mr.' },
     { id: 'IT001', name: 'Tech Admin', email: 'it.admin@cdg.co.th', department: 'IT', companyId: 'CDG', position: 'Admin', jobGrade: 12, mobile: '02-000-0000', type: 'Employee', title: 'Mr.' }
 ];
-
 const INIT_PROJECTS: Project[] = [
-    { code: 'PRJ-2024-001', name: 'Cloud Migration', manager: 'Alex Bennett', budget: 1000000, spent: 250000, status: 'Active' },
-    { code: 'PRJ-2024-002', name: 'AI Integration', manager: 'Sarah Connor', budget: 500000, spent: 10000, status: 'Active' },
+    { code: 'PRJ-2024-001', name: 'Cloud Migration', manager: 'Alex Manager', budget: 1000000, spent: 250000, status: 'Active' },
+    { code: 'PRJ-2024-002', name: 'AI Integration', manager: 'Sarah Staff', budget: 500000, spent: 10000, status: 'Active' },
     { code: 'PRJ-2024-003', name: 'Infra Upgrade', manager: 'John Doe', budget: 2000000, spent: 1500000, status: 'Active' }
 ];
-
 const INIT_COST_CENTERS: CostCenter[] = [
     { code: 'CC-GEN-001', name: 'General Mgmt', department: 'Management', budget: 5000000, available: 4500000 },
     { code: 'CC-SAL-002', name: 'Sales & Marketing', department: 'Sales', budget: 2000000, available: 1200000 },
     { code: 'CC-IT-003', name: 'IT Infrastructure', department: 'IT', budget: 3000000, available: 200000 }
 ];
-
 const STATIC_AIRPORTS = [
-  { code: 'BKK', name: 'Suvarnabhumi Airport', city: 'Bangkok' },
-  { code: 'DMK', name: 'Don Mueang Intl', city: 'Bangkok' },
-  { code: 'CNX', name: 'Chiang Mai Intl', city: 'Chiang Mai' },
-  { code: 'HKT', name: 'Phuket Intl', city: 'Phuket' },
-  { code: 'HDY', name: 'Hat Yai Intl', city: 'Hat Yai' },
-  { code: 'SIN', name: 'Changi Airport', city: 'Singapore' },
-  { code: 'NRT', name: 'Narita Intl', city: 'Tokyo' },
-  { code: 'HND', name: 'Haneda Intl', city: 'Tokyo' },
-  { code: 'LHR', name: 'Heathrow', city: 'London' },
-  { code: 'JFK', name: 'John F. Kennedy', city: 'New York' },
-  { code: 'SFO', name: 'San Francisco Intl', city: 'San Francisco' },
+  { code: 'BKK', name: 'Suvarnabhumi Airport', city: 'Bangkok', country: 'Thailand' },
+  { code: 'DMK', name: 'Don Mueang Intl', city: 'Bangkok', country: 'Thailand' },
+  { code: 'CNX', name: 'Chiang Mai Intl', city: 'Chiang Mai', country: 'Thailand' },
+  { code: 'HKT', name: 'Phuket Intl', city: 'Phuket', country: 'Thailand' },
+  { code: 'HDY', name: 'Hat Yai Intl', city: 'Hat Yai', country: 'Thailand' },
+  { code: 'KKC', name: 'Khon Kaen', city: 'Khon Kaen', country: 'Thailand' },
+  { code: 'UBP', name: 'Ubon Ratchathani', city: 'Ubon Ratchathani', country: 'Thailand' },
+  { code: 'UTH', name: 'Udon Thani', city: 'Udon Thani', country: 'Thailand' },
+  { code: 'SIN', name: 'Changi Airport', city: 'Singapore', country: 'Singapore' },
+  { code: 'NRT', name: 'Narita Intl', city: 'Tokyo', country: 'Japan' },
+  { code: 'HND', name: 'Haneda Intl', city: 'Tokyo', country: 'Japan' },
+  { code: 'LHR', name: 'Heathrow', city: 'London', country: 'UK' },
+  { code: 'JFK', name: 'John F. Kennedy', city: 'New York', country: 'USA' },
+  { code: 'SFO', name: 'San Francisco Intl', city: 'San Francisco', country: 'USA' },
+  { code: 'ICN', name: 'Incheon Intl', city: 'Seoul', country: 'South Korea' },
+  { code: 'HKG', name: 'Hong Kong Intl', city: 'Hong Kong', country: 'Hong Kong' }
 ];
-
-const STATIC_CITIES = [
-  "Bangkok", "Chiang Mai", "Phuket", "Khon Kaen", "Pattaya", "Hat Yai",
-  "Singapore", "Tokyo", "London", "New York", "San Francisco", 
-  "Seoul", "Hong Kong", "Sydney", "Paris", "Berlin", "Vientiane", "Hanoi"
-];
-
-const STATIC_AIRLINES = [
-  "Thai Airways", "Bangkok Airways", "AirAsia", "Nok Air", 
-  "Singapore Airlines", "Japan Airlines", "ANA", "Emirates", "Qatar Airways"
-];
+const STATIC_CITIES = ["Bangkok", "Chiang Mai", "Phuket", "Khon Kaen", "Pattaya", "Hat Yai", "Udon Thani", "Ubon Ratchathani", "Singapore", "Tokyo", "London", "New York", "San Francisco", "Seoul", "Hong Kong", "Sydney", "Paris", "Berlin", "Vientiane", "Hanoi", "Kuala Lumpur"];
+const STATIC_AIRLINES = ["Thai Airways", "Bangkok Airways", "AirAsia", "Nok Air", "Singapore Airlines", "Japan Airlines", "ANA", "Emirates", "Qatar Airways"];
 
 // Helper to safely read localStorage
 const safeGetItem = (key: string, defaultVal: any) => {
@@ -241,7 +178,6 @@ export const storageService = {
   // --- System Settings ---
   getSettings: (): SystemSettings => {
     const loaded = safeGetItem(SETTINGS_KEY, DEFAULT_SETTINGS);
-    // Merge defaults for new fields if they don't exist in stored version
     return { ...DEFAULT_SETTINGS, ...loaded, 
         branding: { ...DEFAULT_SETTINGS.branding, ...loaded.branding }, 
         dashboardConfig: { ...DEFAULT_SETTINGS.dashboardConfig, ...loaded.dashboardConfig },
@@ -260,41 +196,52 @@ export const storageService = {
   // --- Requests (CRUD) ---
   getRequests: async (): Promise<TravelRequest[]> => {
     const settings = storageService.getSettings();
-    
+    const localRequests = safeGetItem(STORAGE_KEY, []);
+
+    // If Supabase is enabled, try to fetch and merge/sync
     if (settings.databaseProvider === 'SUPABASE') {
         const sb = getSupabase();
         if (sb) {
             try {
                 const { data, error } = await sb.from('travel_requests').select('*').order('created_at', { ascending: false });
                 if (!error && data) {
-                    return data.map((row: any) => ({
+                    // Map DB rows to TravelRequest objects
+                    const cloudRequests = data.map((row: any) => ({
                         ...row.request_data, 
                         id: row.id,
                         status: row.status, 
                         requesterId: row.user_id, 
                         submittedAt: row.created_at
                     }));
+                    
+                    // Simple Strategy: Cloud wins if successful. 
+                    // To support offline, we could merge, but for now let's return cloud data if available.
+                    // Also update local cache for next time
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudRequests));
+                    return cloudRequests;
                 }
-            } catch (e) { console.warn("Supabase fetch failed"); }
+            } catch (e) { 
+                console.warn("Supabase fetch failed, falling back to local storage"); 
+            }
         }
     }
-    return safeGetItem(STORAGE_KEY, []);
+    
+    // Fallback or Primary if LOCAL_STORAGE
+    return localRequests;
   },
 
   generateNextRequestId: async (): Promise<string> => {
-    const requests = await storageService.getRequests();
+    // Read from LOCAL storage to ensure we don't duplicate IDs even if cloud is lagging
+    const requests = safeGetItem(STORAGE_KEY, []);
     const settings = storageService.getSettings();
     const prefix = settings.systemParams?.runningNumberPrefix || 'TR-';
     const year = new Date().getFullYear();
     
-    // Pattern: PREFIX-YEAR-XXXX
-    // We must find the MAX sequence number, not just the length, to avoid reuse if items are deleted.
     const yearPrefix = `${prefix}${year}-`;
     let maxSeq = 0;
 
-    requests.forEach(r => {
+    requests.forEach((r: TravelRequest) => {
         if (r.id && r.id.startsWith(yearPrefix)) {
-            // Extract the number part after the last hyphen
             const parts = r.id.split('-');
             const seqStr = parts[parts.length - 1]; 
             const seq = parseInt(seqStr, 10);
@@ -311,135 +258,117 @@ export const storageService = {
   saveRequest: async (request: TravelRequest): Promise<TravelRequest[]> => {
     const settings = storageService.getSettings();
 
+    // 1. UPDATE LOCAL STORAGE IMMEDIATELY (Persistence Guarantee)
+    const localRequests = safeGetItem(STORAGE_KEY, []);
+    const existingIndex = localRequests.findIndex((r: TravelRequest) => r.id === request.id);
+    let newRequests;
+    if (existingIndex >= 0) {
+      newRequests = [...localRequests];
+      newRequests[existingIndex] = request;
+    } else {
+      newRequests = [request, ...localRequests];
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(newRequests));
+
+    // 2. BACKGROUND SYNC TO SUPABASE (If enabled)
     if (settings.databaseProvider === 'SUPABASE') {
         const sb = getSupabase();
         if (sb) {
-            try {
-                const payload = {
-                    id: request.id,
-                    user_id: request.requesterId,
-                    status: request.status,
-                    request_data: request,
-                    updated_at: new Date().toISOString()
-                };
-                await sb.from('travel_requests').upsert(payload);
-            } catch (e) { console.error("Cloud save failed", e); }
+            // Non-blocking async upload
+            sb.from('travel_requests').upsert({
+                id: request.id,
+                user_id: request.requesterId,
+                status: request.status,
+                request_data: request,
+                updated_at: new Date().toISOString()
+            }).then(({ error }) => {
+                if(error) console.error("Cloud sync error:", error);
+            });
         }
     }
 
-    const requests = await storageService.getRequests(); 
-    const existingIndex = requests.findIndex(r => r.id === request.id);
-    let newRequests;
-    if (existingIndex >= 0) {
-      newRequests = [...requests];
-      newRequests[existingIndex] = request;
-    } else {
-      newRequests = [request, ...requests];
-    }
-    
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newRequests));
     return newRequests; 
   },
 
   deleteRequest: async (id: string): Promise<TravelRequest[]> => {
     const settings = storageService.getSettings();
 
-    if (settings.databaseProvider === 'SUPABASE') {
-        const sb = getSupabase();
-        if (sb) await sb.from('travel_requests').delete().eq('id', id);
-    }
-
+    // 1. Local Delete
     const requests = safeGetItem(STORAGE_KEY, []);
     const newRequests = requests.filter((r: TravelRequest) => r.id !== id);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newRequests));
+
+    // 2. Cloud Delete
+    if (settings.databaseProvider === 'SUPABASE') {
+        const sb = getSupabase();
+        if (sb) {
+            sb.from('travel_requests').delete().eq('id', id).then(({error}) => {
+                if(error) console.error("Cloud delete error:", error);
+            });
+        }
+    }
+
     return newRequests;
   },
 
   // --- Dynamic Master Data ---
-
   getEmployees: async (): Promise<TravelerDetails[]> => {
       const stored = safeGetItem('cdg-master-employees', null);
       if (stored) return stored;
       localStorage.setItem('cdg-master-employees', JSON.stringify(INIT_EMPLOYEES));
       return INIT_EMPLOYEES;
   },
-
   saveEmployees: async (employees: TravelerDetails[]): Promise<void> => {
       localStorage.setItem('cdg-master-employees', JSON.stringify(employees));
   },
-
   getProjects: async (): Promise<Project[]> => {
     const stored = safeGetItem('cdg-master-projects', null);
     if (stored) return stored;
     localStorage.setItem('cdg-master-projects', JSON.stringify(INIT_PROJECTS));
     return INIT_PROJECTS;
   },
-
   saveProjects: async (projects: Project[]): Promise<void> => {
       localStorage.setItem('cdg-master-projects', JSON.stringify(projects));
   },
-
   getCostCenters: async (): Promise<CostCenter[]> => {
     const stored = safeGetItem('cdg-master-costcenters', null);
     if (stored) return stored;
     localStorage.setItem('cdg-master-costcenters', JSON.stringify(INIT_COST_CENTERS));
     return INIT_COST_CENTERS;
   },
-
   saveCostCenters: async (costCenters: CostCenter[]): Promise<void> => {
       localStorage.setItem('cdg-master-costcenters', JSON.stringify(costCenters));
   },
-
   // --- Static Reference Data ---
   getAirports: async (): Promise<any[]> => STATIC_AIRPORTS,
   getCities: async (): Promise<string[]> => STATIC_CITIES,
   getAirlines: async (): Promise<string[]> => STATIC_AIRLINES,
-
   // --- Agencies ---
   getAgencies: async (): Promise<Agency[]> => {
      return safeGetItem('cdg-master-agencies', []);
   },
-
   saveAgencies: async (agencies: Agency[]): Promise<void> => {
       localStorage.setItem('cdg-master-agencies', JSON.stringify(agencies));
   },
-
   // --- Policy ---
   getPolicies: async (): Promise<TravelPolicy> => {
-    // Attempt to load policy; if new fields don't exist, merge with INIT
     const loaded = safeGetItem('cdg-travel-policy', INIT_POLICY);
-    
-    // Deep merge to ensure new arrays (zones, budgets) exist
-    return {
-        ...INIT_POLICY,
-        ...loaded,
-        complexRules: loaded.complexRules || INIT_POLICY.complexRules,
-        doaMatrix: loaded.doaMatrix || INIT_POLICY.doaMatrix,
-        companies: loaded.companies || INIT_POLICY.companies,
-        zones: loaded.zones || INIT_POLICY.zones,
-        expenseCategories: loaded.expenseCategories || INIT_POLICY.expenseCategories,
-        cashAdvance: loaded.cashAdvance || INIT_POLICY.cashAdvance,
-        budgetRules: loaded.budgetRules || INIT_POLICY.budgetRules
-    };
+    return { ...INIT_POLICY, ...loaded, complexRules: loaded.complexRules || INIT_POLICY.complexRules };
   },
-
   savePolicies: async (policy: TravelPolicy): Promise<void> => {
     localStorage.setItem('cdg-travel-policy', JSON.stringify(policy));
-    // Log change
     storageService.addAuditLog('Policy updated by Admin');
   },
-
   // --- Audit Logs ---
   getAuditLogs: async (): Promise<AuditLog[]> => {
       return safeGetItem(AUDIT_KEY, []);
   },
-
   addAuditLog: async (action: string, module: string = 'SYSTEM', details: string = '') => {
       const logs = safeGetItem(AUDIT_KEY, []);
       const newLog: AuditLog = {
           id: `LOG-${Date.now()}`,
           timestamp: new Date().toISOString(),
-          user: 'IT_ADMIN', // Placeholder, ideally from Context
+          user: 'IT_ADMIN',
           action,
           module,
           details

@@ -1,18 +1,18 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ArrowLeft, User, Users, Briefcase, MapPin, 
   CalendarDays, CreditCard, Sparkles, Check, AlertCircle, 
   ChevronRight, Loader2, Building, Plus, Trash2, Info,
-  Calculator, GitMerge, Languages
+  Calculator, GitMerge, Languages, Clock, Moon, Bus, Train, Car, Luggage, UserCheck, Utensils, Shield, Eye, X
 } from 'lucide-react';
-import { TravelRequest, RequestFor, TravelType, TravelPolicy } from '../types';
+import { TravelRequest, RequestFor, TravelType, TravelPolicy, TravelerDetails } from '../types';
 import { generateJustification } from '../services/geminiService';
 import { validatePolicy, calculateMileageReimbursement, getDailyPerDiem, getHotelLimit, getApprovalFlow } from '../services/policyRules';
 import { storageService } from '../services/storage';
 import { SearchableSelect } from './ui/SearchableSelect';
 import { ServiceIcon } from './common/ServiceIcon'; // Shared Component
-import { formatCurrency } from '../utils/formatters'; // Shared Function
+import { formatCurrency, formatDate } from '../utils/formatters'; // Shared Function
 import { useTravelRequestForm } from '../hooks/useTravelRequestForm';
 import { useTranslation } from '../services/translations';
 import { useAiTranslation } from '../hooks/useAiTranslation';
@@ -25,6 +25,16 @@ interface NewRequestFormProps {
 
 const STEPS = ['form.step.travelers', 'form.step.trip', 'form.step.services', 'form.step.review'];
 
+const ASIA_COUNTRIES = ["Thailand", "Japan", "South Korea", "China", "Hong Kong", "Taiwan", "Vietnam", "Singapore", "Malaysia", "Laos", "Cambodia", "Myanmar", "Philippines", "Indonesia", "India"];
+const THAI_CITIES = ["Bangkok", "Chiang Mai", "Phuket", "Khon Kaen", "Pattaya", "Hat Yai", "Udon Thani", "Ubon Ratchathani"];
+
+const INSURANCE_PLANS = [
+    { id: 'HIPHOP', name: 'Hip Hop (Basic)', zone: 'ALL' },
+    { id: 'BOOGIE', name: 'Boogie (Standard)', zone: 'ALL' },
+    { id: 'SAMBA', name: 'Samba (Gold)', zone: 'ALL' },
+    { id: 'TANGO', name: 'Tango (Platinum)', zone: 'WORLDWIDE_ONLY' },
+];
+
 export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onCancel, onSubmit }) => {
   const { t } = useTranslation();
   const { translate, isLoading: isTranslating } = useAiTranslation();
@@ -36,6 +46,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
   const [policyFeedback, setPolicyFeedback] = useState<{ compliant: boolean; message: string, flags: string[] } | null>(null);
   const [approvalFlow, setApprovalFlow] = useState<string[]>([]);
   const [currentPolicy, setCurrentPolicy] = useState<TravelPolicy | undefined>(undefined);
+  const [isCoverageModalOpen, setIsCoverageModalOpen] = useState(false);
 
   // Dynamic Data State
   const [availableProjects, setAvailableProjects] = useState<any[]>([]);
@@ -57,7 +68,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
       travelType, setTravelType,
       travelers, addTraveler, updateTraveler, removeTraveler, selectEmployeeTraveler,
       trip, setTrip, handleTripChange,
-      services, addService, removeService, updateService,
+      services, setServices, addService, removeService, updateService,
       estimatedCost, setEstimatedCost,
       calculateDays, buildRequestObject
   } = useTravelRequestForm(initialData);
@@ -133,6 +144,29 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
       setTrip(prev => ({ ...prev, justification: translated }));
   };
 
+  // Helper to calculate nights between dates
+  const calculateNights = (inDate: string, outDate: string) => {
+      if (!inDate || !outDate) return 0;
+      const start = new Date(inDate);
+      const end = new Date(outDate);
+      const diffTime = Math.abs(end.getTime() - start.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+      return diffDays > 0 ? diffDays : 0;
+  };
+
+  // Helper: Smart Plan Selection
+  const getRecommendedPlan = (dest: string) => {
+      if (!dest) return 'BOOGIE';
+      const isAsia = ASIA_COUNTRIES.some(c => dest.toLowerCase().includes(c.toLowerCase()));
+      // Default to Boogie (Standard) for both, but could differentiate if needed
+      return 'BOOGIE';
+  };
+
+  const getAvailablePlans = (dest: string) => {
+      const isAsia = ASIA_COUNTRIES.some(c => dest.toLowerCase().includes(c.toLowerCase()));
+      return INSURANCE_PLANS.filter(p => isAsia ? p.zone === 'ALL' : true);
+  };
+
   // Real-time Policy & DOA Check using Rule Engine
   useEffect(() => {
       const runValidation = () => {
@@ -205,9 +239,47 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
     setIsSubmitting(false);
   };
 
+  // --- LOCATION FILTERING LOGIC ---
+  const filteredLocationOptions = useMemo(() => {
+      const isDomestic = travelType === TravelType.DOMESTIC;
+      
+      const allAirports = refData.airports.map(a => ({ 
+          value: a.code, 
+          label: `${a.code} - ${a.name}`, 
+          subLabel: a.city,
+          isThai: a.country === 'Thailand' || THAI_CITIES.includes(a.city)
+      }));
+      
+      const allCities = refData.cities.map(c => ({ 
+          value: c, 
+          label: c,
+          isThai: THAI_CITIES.includes(c)
+      }));
+
+      // Helper to generate options based on scope
+      const getOptions = (scope: 'DOMESTIC' | 'INTERNATIONAL' | 'ALL') => {
+          const airportOpts = allAirports.filter(a => {
+              if (scope === 'DOMESTIC') return a.isThai;
+              if (scope === 'INTERNATIONAL') return !a.isThai;
+              return true;
+          });
+          const cityOpts = allCities.filter(c => {
+              if (scope === 'DOMESTIC') return c.isThai;
+              if (scope === 'INTERNATIONAL') return !c.isThai;
+              return true;
+          });
+          return [...airportOpts, ...cityOpts];
+      };
+
+      return {
+          origin: getOptions(isDomestic ? 'DOMESTIC' : 'ALL'), // Intl trip can start from domestic
+          destination: getOptions(isDomestic ? 'DOMESTIC' : 'INTERNATIONAL'),
+          domesticOnly: getOptions('DOMESTIC'),
+          intlOnly: getOptions('INTERNATIONAL')
+      };
+  }, [refData, travelType]);
+
   // Options Handlers
-  const airportOptions = refData.airports.map(a => ({ value: a.code, label: `${a.code} - ${a.name}`, subLabel: a.city }));
-  const cityOptions = refData.cities.map(c => ({ value: c, label: c }));
   const projectOptions = availableProjects.map(p => ({ value: p.code, label: p.code, subLabel: p.name }));
   const airlineOptions = refData.airlines.map(a => ({ value: a, label: a }));
 
@@ -303,8 +375,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                       )}
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        
-                        {/* DEPARTMENT FIELD - UPDATED TO SEARCHABLE SELECT */}
+                        {/* ... Traveler Fields (Same as before) ... */}
                         <div>
                              <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">
                                 {traveler.type === 'Employee' ? t('form.label.dept') : t('form.label.company')}
@@ -327,7 +398,6 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                              )}
                         </div>
 
-                        {/* EMPLOYEE ID FIELD - UPDATED TO SEARCHABLE SELECT */}
                         {traveler.type === 'Employee' && (
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.empId')}</label>
@@ -340,7 +410,6 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                             </div>
                         )}
 
-                        {/* FULL NAME FIELD */}
                         <div className={`sm:col-span-2 ${traveler.type === 'Employee' ? 'lg:col-span-1' : 'lg:col-span-2'}`}>
                             <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.fullName')}</label>
                             {traveler.type === 'Employee' ? (
@@ -394,27 +463,47 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                         </div>
                       </div>
 
-                      {travelType === TravelType.INTERNATIONAL && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 pt-4 border-t border-slate-200 border-dashed">
-                             <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.passport')}</label>
-                                <input 
-                                    type="text" value={traveler.passportNumber || ''}
-                                    onChange={(e) => updateTraveler(idx, 'passportNumber', e.target.value)}
-                                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm"
-                                    placeholder="X1234567"
-                                />
-                             </div>
-                             <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.passportExpiry')}</label>
-                                <input 
-                                    type="date" value={traveler.passportExpiry || ''}
-                                    onChange={(e) => updateTraveler(idx, 'passportExpiry', e.target.value)}
-                                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm"
-                                />
-                             </div>
-                          </div>
-                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 pt-4 border-t border-slate-200 border-dashed">
+                         {travelType === TravelType.INTERNATIONAL && (
+                             <>
+                                 <div>
+                                    <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.passport')}</label>
+                                    <input 
+                                        type="text" value={traveler.passportNumber || ''}
+                                        onChange={(e) => updateTraveler(idx, 'passportNumber', e.target.value)}
+                                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm"
+                                        placeholder="X1234567"
+                                    />
+                                 </div>
+                                 <div>
+                                    <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">{t('form.label.passportExpiry')}</label>
+                                    <input 
+                                        type="date" value={traveler.passportExpiry || ''}
+                                        onChange={(e) => updateTraveler(idx, 'passportExpiry', e.target.value)}
+                                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm"
+                                    />
+                                 </div>
+                             </>
+                         )}
+                         <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">National ID / เลขบัตร ปชช.</label>
+                            <input 
+                                type="text" value={traveler.nationalId || ''}
+                                onChange={(e) => updateTraveler(idx, 'nationalId', e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm"
+                                placeholder="1-xxxx-xxxxx-xx-x"
+                            />
+                         </div>
+                         <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Home Address / ที่อยู่</label>
+                            <input 
+                                type="text" value={traveler.address || ''}
+                                onChange={(e) => updateTraveler(idx, 'address', e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm"
+                                placeholder="Current address for insurance"
+                            />
+                         </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -429,7 +518,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                  <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">{t('form.label.origin')}</label>
                     <SearchableSelect 
-                        options={[...airportOptions, ...cityOptions]}
+                        options={filteredLocationOptions.origin}
                         value={trip.origin}
                         onChange={(val) => setTrip(prev => ({...prev, origin: val}))}
                         placeholder="Select Origin..."
@@ -439,7 +528,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                  <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">{t('form.label.dest')}</label>
                     <SearchableSelect 
-                        options={[...airportOptions, ...cityOptions]}
+                        options={filteredLocationOptions.destination}
                         value={trip.destination}
                         onChange={(val) => setTrip(prev => ({...prev, destination: val}))}
                         placeholder="Select Destination..."
@@ -461,6 +550,19 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                       <input type="date" name="endDate" value={trip.endDate} onChange={(e) => handleTripChange('endDate', e.target.value)} className="w-full pl-10 px-3 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900 outline-none" />
                    </div>
                  </div>
+              </div>
+
+              {/* Billable To (New Field) */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Budget Reclaim / Bill To Agency</label>
+                  <input 
+                      type="text"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="e.g. Client Company A (Optional)"
+                      value={trip.billableTo || ''}
+                      onChange={(e) => handleTripChange('billableTo', e.target.value)}
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Leave empty if charging to internal Cost Center only.</p>
               </div>
 
               {/* Purpose & Justification */}
@@ -505,8 +607,28 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                    <span className="w-full text-center text-xs font-bold text-slate-400 uppercase mb-1">Add Services</span>
                    <button onClick={() => addService('FLIGHT')} className="service-btn bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"><ServiceIcon type="FLIGHT" size={16}/> Flight</button>
                    <button onClick={() => addService('HOTEL')} className="service-btn bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100"><ServiceIcon type="HOTEL" size={16}/> Hotel</button>
-                   <button onClick={() => addService('CAR')} className="service-btn bg-green-50 text-green-700 border-green-200 hover:bg-green-100"><ServiceIcon type="CAR" size={16}/> Car Rental</button>
-                   <button onClick={() => addService('INSURANCE')} className="service-btn bg-red-50 text-red-700 border-red-200 hover:bg-red-100"><ServiceIcon type="INSURANCE" size={16}/> Insurance</button>
+                   
+                   {/* Combined Ground Transport Visual Group */}
+                   <div className="flex bg-slate-100 rounded-full p-1 gap-1">
+                       <button onClick={() => addService('CAR')} className="service-btn-sm bg-green-50 text-green-700 border-green-200 hover:bg-green-100"><Car size={14}/> Car</button>
+                       <button onClick={() => addService('TRAIN')} className="service-btn-sm bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-300"><Train size={14}/> Train</button>
+                       <button onClick={() => addService('BUS')} className="service-btn-sm bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-300"><Bus size={14}/> Bus</button>
+                   </div>
+
+                   <button 
+                        onClick={() => {
+                            const id = `SVC-${Date.now()}`;
+                            const newSvc: any = { 
+                                id, type: 'INSURANCE', 
+                                assignedTravelerIds: [],
+                                plan: getRecommendedPlan(trip.destination) // Smart Default
+                            };
+                            setServices(prev => [...prev, newSvc]);
+                        }} 
+                        className="service-btn bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                   >
+                       <ServiceIcon type="INSURANCE" size={16}/> Insurance
+                   </button>
                    <button onClick={() => addService('EVENT')} className="service-btn bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"><ServiceIcon type="EVENT" size={16}/> Event Pass</button>
                 </div>
 
@@ -515,7 +637,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                       <div key={svc.id} className="border border-slate-200 rounded-xl shadow-sm animate-fade-in group bg-white">
                          <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center rounded-t-xl">
                              <div className="flex items-center gap-2 font-bold text-slate-700">
-                                <div className={`p-1.5 rounded-lg ${svc.type === 'FLIGHT' ? 'bg-blue-100 text-blue-600' : svc.type === 'HOTEL' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'}`}>
+                                <div className={`p-1.5 rounded-lg ${svc.type === 'FLIGHT' ? 'bg-blue-100 text-blue-600' : svc.type === 'HOTEL' ? 'bg-orange-100 text-orange-600' : svc.type === 'INSURANCE' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>
                                     <ServiceIcon type={svc.type} size={18}/>
                                 </div>
                                 <span>{svc.type} Request</span>
@@ -524,6 +646,48 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                          </div>
 
                          <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                             {/* --- TRAVELER ASSIGNMENT --- */}
+                             <div className="md:col-span-2 bg-slate-100 p-2 rounded-lg flex items-center gap-3">
+                                 <div className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
+                                     <UserCheck size={14}/> Assign to:
+                                 </div>
+                                 <div className="flex flex-wrap gap-2">
+                                     <label className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border cursor-pointer hover:border-blue-400">
+                                         <input 
+                                             type="checkbox" 
+                                             checked={!svc.assignedTravelerIds || svc.assignedTravelerIds.length === 0}
+                                             onChange={(e) => updateService(svc.id, 'assignedTravelerIds', e.target.checked ? [] : travelers.map(t => t.id))}
+                                         />
+                                         <span className="text-xs font-bold">Everyone</span>
+                                     </label>
+                                     {travelers.map(t => (
+                                         <label key={t.id} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border cursor-pointer hover:border-blue-400">
+                                             <input 
+                                                 type="checkbox" 
+                                                 checked={svc.assignedTravelerIds?.includes(t.id) || (!svc.assignedTravelerIds || svc.assignedTravelerIds.length === 0)}
+                                                 onChange={(e) => {
+                                                     const current = svc.assignedTravelerIds || [];
+                                                     let next = [];
+                                                     if (e.target.checked) {
+                                                         const base = (current.length === 0) ? travelers.map(tr => tr.id) : current;
+                                                         if (!base.includes(t.id)) next = [...base, t.id]; else next = base;
+                                                     } else {
+                                                         const base = (current.length === 0) ? travelers.map(tr => tr.id) : current;
+                                                         next = base.filter(id => id !== t.id);
+                                                     }
+                                                     // If next includes all, make it empty again for cleanliness
+                                                     if (next.length === travelers.length) next = [];
+                                                     updateService(svc.id, 'assignedTravelerIds', next);
+                                                 }}
+                                             />
+                                             <span className="text-xs text-slate-700">{t.name.split(' ')[0]}</span>
+                                         </label>
+                                     ))}
+                                 </div>
+                             </div>
+
+                             {/* --- SERVICE SPECIFIC FIELDS --- */}
+
                              {svc.type === 'FLIGHT' && (
                                 <>
                                   <div className="md:col-span-2 flex gap-4">
@@ -536,32 +700,47 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                                   </div>
                                   <div>
                                       <label className="label-sm">From</label>
-                                      <SearchableSelect options={airportOptions} value={(svc as any).from} onChange={(v) => updateService(svc.id, 'from', v)} placeholder="Origin Airport" />
+                                      <SearchableSelect options={filteredLocationOptions.origin} value={(svc as any).from} onChange={(v) => updateService(svc.id, 'from', v)} placeholder="Origin Airport" />
                                   </div>
                                   <div>
                                       <label className="label-sm">To</label>
-                                      <SearchableSelect options={airportOptions} value={(svc as any).to} onChange={(v) => updateService(svc.id, 'to', v)} placeholder="Dest Airport" />
+                                      <SearchableSelect options={filteredLocationOptions.destination} value={(svc as any).to} onChange={(v) => updateService(svc.id, 'to', v)} placeholder="Dest Airport" />
                                   </div>
-                                  <div className="grid grid-cols-2 gap-2">
+                                  
+                                  {/* Departure Section */}
+                                  <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                      <div className="col-span-2 text-[10px] font-bold text-blue-600 uppercase mb-1">Departure Flight</div>
                                       <div>
-                                          <label className="label-sm">Depart Date</label>
+                                          <label className="label-sm">Date</label>
                                           <input type="date" value={(svc as any).departureDate} onChange={e => updateService(svc.id, 'departureDate', e.target.value)} className="input-field"/>
                                       </div>
                                       <div>
-                                          <label className="label-sm">Time Pref</label>
-                                          <select className="input-field" onChange={e => updateService(svc.id, 'departureTimeSlot', e.target.value)}>
-                                              <option value="MORNING">Morning</option><option value="AFTERNOON">Afternoon</option><option value="EVENING">Evening</option>
-                                          </select>
+                                          <label className="label-sm">Preferred Time</label>
+                                          <div className="relative">
+                                              <Clock size={14} className="absolute left-3 top-3 text-slate-400"/>
+                                              <input type="time" value={(svc as any).preferredDepartureTime || ''} onChange={e => updateService(svc.id, 'preferredDepartureTime', e.target.value)} className="input-field !pl-10"/>
+                                          </div>
                                       </div>
                                   </div>
+
+                                  {/* Return Section (Conditional) */}
                                   {(svc as any).tripType === 'ROUND_TRIP' && (
-                                      <div className="grid grid-cols-2 gap-2">
+                                      <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                          <div className="col-span-2 text-[10px] font-bold text-blue-600 uppercase mb-1">Return Flight</div>
                                           <div>
-                                              <label className="label-sm">Return Date</label>
+                                              <label className="label-sm">Date</label>
                                               <input type="date" value={(svc as any).returnDate} onChange={e => updateService(svc.id, 'returnDate', e.target.value)} className="input-field"/>
+                                          </div>
+                                          <div>
+                                              <label className="label-sm">Preferred Time</label>
+                                              <div className="relative">
+                                                  <Clock size={14} className="absolute left-3 top-3 text-slate-400"/>
+                                                  <input type="time" value={(svc as any).preferredReturnTime || ''} onChange={e => updateService(svc.id, 'preferredReturnTime', e.target.value)} className="input-field !pl-10"/>
+                                              </div>
                                           </div>
                                       </div>
                                   )}
+
                                   <div>
                                       <label className="label-sm">Class</label>
                                       <select value={(svc as any).flightClass} onChange={e => updateService(svc.id, 'flightClass', e.target.value)} className="input-field">
@@ -572,14 +751,73 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                                       <label className="label-sm">Airline Preference</label>
                                       <SearchableSelect options={airlineOptions} value={(svc as any).airlinePreference} onChange={v => updateService(svc.id, 'airlinePreference', v)} placeholder="Any Airline" />
                                   </div>
+
+                                  {/* NEW: Baggage & Meal (Low Cost Extras) */}
+                                  <div className="md:col-span-2 border-t border-slate-100 pt-3 mt-1 space-y-3">
+                                      <div className="flex items-center gap-4">
+                                          <label className="flex items-center gap-2 cursor-pointer bg-yellow-50 p-2 rounded-lg border border-yellow-200 flex-1">
+                                              <input 
+                                                  type="checkbox" 
+                                                  checked={(svc as any).needExtraBaggage || false}
+                                                  onChange={e => updateService(svc.id, 'needExtraBaggage', e.target.checked)}
+                                              />
+                                              <div>
+                                                  <span className="text-sm font-bold text-yellow-800 flex items-center gap-1">
+                                                      <Luggage size={14}/> Purchase Extra Baggage?
+                                                  </span>
+                                                  <span className="text-[10px] text-yellow-700">ซื้อน้ำหนักเพิ่ม</span>
+                                              </div>
+                                          </label>
+
+                                          <label className="flex items-center gap-2 cursor-pointer bg-green-50 p-2 rounded-lg border border-green-200 flex-1">
+                                              <input 
+                                                  type="checkbox" 
+                                                  checked={(svc as any).mealIncluded || false}
+                                                  onChange={e => updateService(svc.id, 'mealIncluded', e.target.checked)}
+                                              />
+                                              <div>
+                                                  <span className="text-sm font-bold text-green-800 flex items-center gap-1">
+                                                      <Utensils size={14}/> Add In-flight Meal?
+                                                  </span>
+                                                  <span className="text-[10px] text-green-700">รับอาหารบนเครื่อง</span>
+                                              </div>
+                                          </label>
+                                      </div>
+                                  </div>
+                                  
+                                  {(svc as any).needExtraBaggage && (
+                                      <div className="md:col-span-2 animate-fade-in bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                          <label className="label-sm text-slate-700">Required Weight (kg) / น้ำหนักที่ต้องการ</label>
+                                          <div className="relative">
+                                              <Luggage size={16} className="absolute left-3 top-3 text-slate-400"/>
+                                              <input 
+                                                  type="number" 
+                                                  className="input-field !pl-10" 
+                                                  placeholder="e.g. 20"
+                                                  value={(svc as any).baggageWeight || ''}
+                                                  onChange={e => updateService(svc.id, 'baggageWeight', parseFloat(e.target.value))}
+                                              />
+                                          </div>
+                                      </div>
+                                  )}
                                 </>
                              )}
 
                              {svc.type === 'HOTEL' && (
                                 <>
                                    <div className="md:col-span-2">
-                                       <label className="label-sm">Area / City / Hotel Name</label>
-                                       <SearchableSelect options={cityOptions} value={(svc as any).location} onChange={v => updateService(svc.id, 'location', v)} placeholder="Search Location..." />
+                                       <label className="label-sm">Area / City</label>
+                                       <SearchableSelect options={filteredLocationOptions.destination} value={(svc as any).location} onChange={v => updateService(svc.id, 'location', v)} placeholder="Search Location..." />
+                                   </div>
+                                   <div className="md:col-span-2">
+                                       <label className="label-sm">Preferred Hotel Name (Optional)</label>
+                                       <input 
+                                            type="text" 
+                                            className="input-field" 
+                                            placeholder="e.g. Hilton Sukhumvit"
+                                            value={(svc as any).hotelName || ''}
+                                            onChange={e => updateService(svc.id, 'hotelName', e.target.value)}
+                                       />
                                    </div>
                                    <div className="flex gap-2">
                                        <div className="flex-1">
@@ -589,6 +827,24 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                                        <div className="flex-1">
                                            <label className="label-sm">Check-out</label>
                                            <input type="date" value={(svc as any).checkOut} onChange={e => updateService(svc.id, 'checkOut', e.target.value)} className="input-field"/>
+                                       </div>
+                                   </div>
+                                   <div className="flex gap-2 items-center">
+                                       <div className="w-1/3">
+                                           <label className="label-sm">Rooms</label>
+                                           <input 
+                                                type="number" 
+                                                min="1"
+                                                className="input-field" 
+                                                value={(svc as any).roomCount || 1} 
+                                                onChange={e => updateService(svc.id, 'roomCount', parseInt(e.target.value))}
+                                           />
+                                       </div>
+                                       <div className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 flex items-center justify-center gap-2 mt-5">
+                                            <Moon size={16} className="text-slate-400"/>
+                                            <span className="text-sm font-bold text-slate-700">
+                                                {calculateNights((svc as any).checkIn, (svc as any).checkOut)} Nights
+                                            </span>
                                        </div>
                                    </div>
                                 </>
@@ -630,8 +886,95 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
                                   )}
                                 </>
                              )}
+
+                             {(svc.type === 'TRAIN' || svc.type === 'BUS') && (
+                                <>
+                                  <div className="md:col-span-2">
+                                      <label className="label-sm">Route</label>
+                                      <div className="flex gap-2">
+                                         <input type="text" className="input-field" placeholder="From (e.g. Bangkok)" value={(svc as any).from} onChange={e => updateService(svc.id, 'from', e.target.value)}/>
+                                         <input type="text" className="input-field" placeholder="To (e.g. Chiang Mai)" value={(svc as any).to} onChange={e => updateService(svc.id, 'to', e.target.value)}/>
+                                      </div>
+                                  </div>
+                                  <div>
+                                      <label className="label-sm">Date</label>
+                                      <input type="date" value={(svc as any).departureDate} onChange={e => updateService(svc.id, 'departureDate', e.target.value)} className="input-field"/>
+                                  </div>
+                                  <div>
+                                      <label className="label-sm">Time Pref</label>
+                                      <input type="time" value={(svc as any).departureTime} onChange={e => updateService(svc.id, 'departureTime', e.target.value)} className="input-field"/>
+                                  </div>
+                                </>
+                             )}
                              
-                             {(svc.type === 'INSURANCE' || svc.type === 'EVENT') && (
+                             {svc.type === 'INSURANCE' && (
+                                 <>
+                                    <div className="md:col-span-2 bg-red-50 p-4 rounded-xl border border-red-100 space-y-4">
+                                        <div className="flex items-start gap-4">
+                                            <div className="bg-white p-2 rounded-lg border border-red-100 text-red-600">
+                                                <Shield size={24}/>
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <label className="label-sm text-red-800">Coverage Plan</label>
+                                                    <button onClick={() => setIsCoverageModalOpen(true)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                                                        <Eye size={12}/> View Conditions
+                                                    </button>
+                                                </div>
+                                                <select 
+                                                    className="w-full input-field font-bold text-slate-700" 
+                                                    value={(svc as any).plan || getRecommendedPlan(trip.destination)}
+                                                    onChange={e => updateService(svc.id, 'plan', e.target.value)}
+                                                >
+                                                    {getAvailablePlans(trip.destination).map(p => (
+                                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                                    ))}
+                                                </select>
+                                                <p className="text-[10px] text-red-600 mt-1">
+                                                    *Recommended based on destination: {getRecommendedPlan(trip.destination) === 'BOOGIE' ? 'Standard' : 'Asia'}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Auto-filled Info Block */}
+                                        <div className="bg-white p-3 rounded-lg border border-slate-200">
+                                            <div className="text-[10px] font-bold text-slate-400 uppercase mb-2">Insured Persons (Auto-filled from Profile)</div>
+                                            <div className="space-y-2">
+                                                {/* Filter travelers assigned to this service (or all if none selected) */}
+                                                {(svc.assignedTravelerIds && svc.assignedTravelerIds.length > 0 
+                                                    ? travelers.filter(t => svc.assignedTravelerIds?.includes(t.id)) 
+                                                    : travelers
+                                                ).map((t, idx) => (
+                                                    <div key={idx} className="text-xs border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+                                                        <div className="font-bold text-slate-800">{t.title} {t.name}</div>
+                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 text-slate-500">
+                                                            <div>Route: <span className="text-slate-800">{trip.origin} - {trip.destination}</span></div>
+                                                            <div>Period: <span className="text-slate-800">{formatDate(trip.startDate)} - {formatDate(trip.endDate)}</span></div>
+                                                            <div>ID Card: <span className="text-slate-800">{t.nationalId || '-'}</span></div>
+                                                            <div>DOB: <span className="text-slate-800">{t.dateOfBirth || '-'}</span></div>
+                                                            <div className="col-span-2">Address: <span className="text-slate-800">{t.address || t.department + ' (Company Address)'}</span></div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Beneficiary */}
+                                        <div>
+                                            <label className="label-sm">Beneficiary with Relationship</label>
+                                            <input 
+                                                type="text" 
+                                                className="input-field" 
+                                                placeholder="e.g. Jane Doe (Mother)"
+                                                value={(svc as any).beneficiary || ''}
+                                                onChange={e => updateService(svc.id, 'beneficiary', e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                 </>
+                             )}
+
+                             {svc.type === 'EVENT' && (
                                  <div className="md:col-span-2">
                                     <textarea placeholder="Additional Notes..." className="input-field mt-2" rows={2} onChange={e => updateService(svc.id, 'notes', e.target.value)}></textarea>
                                  </div>
@@ -646,6 +989,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
 
           {currentStep === 3 && (
             <div className="space-y-6 animate-fade-in">
+                {/* ... existing step 3 content ... */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                    <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('form.label.project')}</label>
@@ -742,11 +1086,47 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({ initialData, onC
         </div>
 
       </div>
+
+      {/* COVERAGE MODAL */}
+      {isCoverageModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
+                  <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-900 text-white">
+                      <h3 className="font-bold text-lg">Insurance Coverage Plans</h3>
+                      <button onClick={() => setIsCoverageModalOpen(false)}><X size={24}/></button>
+                  </div>
+                  <div className="flex-1 overflow-auto p-4">
+                      <table className="w-full text-xs md:text-sm border-collapse">
+                          <thead className="bg-blue-50 text-blue-900 sticky top-0">
+                              <tr>
+                                  <th className="p-2 border text-left">Coverage Item</th>
+                                  <th className="p-2 border text-center bg-blue-100">Hip Hop</th>
+                                  <th className="p-2 border text-center bg-green-100">Boogie (Std)</th>
+                                  <th className="p-2 border text-center bg-red-100">Samba</th>
+                                  <th className="p-2 border text-center bg-orange-100">Tango</th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              <tr><td className="p-2 border font-bold">1. Loss of Life / Accident</td><td className="p-2 border text-center">1,500,000</td><td className="p-2 border text-center">2,000,000</td><td className="p-2 border text-center">5,000,000</td><td className="p-2 border text-center">6,000,000</td></tr>
+                              <tr><td className="p-2 border font-bold">2. Medical Expense</td><td className="p-2 border text-center">2,000,000</td><td className="p-2 border text-center">2,000,000</td><td className="p-2 border text-center">3,000,000</td><td className="p-2 border text-center">4,000,000</td></tr>
+                              <tr><td className="p-2 border font-bold">3. Emergency Evacuation</td><td className="p-2 border text-center">4,000,000</td><td className="p-2 border text-center">4,000,000</td><td className="p-2 border text-center">5,000,000</td><td className="p-2 border text-center">5,000,000</td></tr>
+                              <tr><td className="p-2 border font-bold">6. Trip Cancellation</td><td className="p-2 border text-center">50,000</td><td className="p-2 border text-center">100,000</td><td className="p-2 border text-center">100,000</td><td className="p-2 border text-center">500,000</td></tr>
+                              <tr><td className="p-2 border font-bold">8. Travel Delay</td><td className="p-2 border text-center">-</td><td className="p-2 border text-center">10,000</td><td className="p-2 border text-center">40,000</td><td className="p-2 border text-center">50,000</td></tr>
+                              <tr><td className="p-2 border font-bold">10. Baggage Loss</td><td className="p-2 border text-center">-</td><td className="p-2 border text-center">15,000</td><td className="p-2 border text-center">50,000</td><td className="p-2 border text-center">50,000</td></tr>
+                          </tbody>
+                      </table>
+                      <p className="mt-4 text-xs text-slate-500">* All values in THB. Refer to full policy document for details.</p>
+                  </div>
+              </div>
+          </div>
+      )}
+
       <style>{`
         .label-sm { display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 0.25rem; }
         .input-field { width: 100%; padding: 0.5rem 0.75rem; background-color: white; border: 1px solid #e2e8f0; border-radius: 0.75rem; font-size: 0.875rem; outline: none; }
         .input-field:focus { border-color: #0f172a; ring: 1px solid #0f172a; }
         .service-btn { padding: 0.5rem 1rem; border-radius: 9999px; border-width: 1px; font-size: 0.75rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; transition: all; }
+        .service-btn-sm { padding: 0.5rem 0.75rem; border-radius: 9999px; border-width: 1px; font-size: 0.75rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; transition: all; }
       `}</style>
     </div>
   );

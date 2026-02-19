@@ -24,6 +24,17 @@ export enum RequestStatus {
   COMPLETED = 'Completed',
 }
 
+// --- Security & Workflow Types ---
+export interface ApprovalLog {
+    id: string;
+    approverId: string;
+    approverName: string;
+    role: string;
+    action: 'APPROVED' | 'REJECTED' | 'SENT_BACK';
+    timestamp: string;
+    comments?: string;
+}
+
 // --- System Configuration ---
 export type ApiProvider = 'GEMINI' | 'OPENAI' | 'CUSTOM' | 'MOCK';
 export type DatabaseProvider = 'LOCAL_STORAGE' | 'REST_API' | 'SUPABASE';
@@ -63,7 +74,7 @@ export interface DashboardConfig {
     showStats: boolean;
     showRecentRequests: boolean;
     showPendingApprovals: boolean;
-    showCalendarWidget: boolean; // Future placeholder
+    showCalendarWidget: false;
 }
 
 export interface DocumentTemplateConfig {
@@ -279,13 +290,22 @@ export interface TravelPolicy {
 }
 
 // --- Service Interfaces ---
-export type ServiceType = 'FLIGHT' | 'HOTEL' | 'CAR' | 'INSURANCE' | 'EVENT';
+export type ServiceType = 'FLIGHT' | 'HOTEL' | 'CAR' | 'INSURANCE' | 'EVENT' | 'TRAIN' | 'BUS';
 
 export interface ServiceBase {
   id: string;
   type: ServiceType;
-  actualCost?: number; // Added to track individual service cost from vendor
+  
+  // Costing
+  actualCost?: number; // Total (Net)
+  costExclVat?: number; // NEW: Price Before VAT
+  vatAmount?: number; // NEW: VAT Amount
+  
+  // Assignment
+  assignedTravelerIds?: string[]; // NEW: Specific IDs, if empty = ALL
+  
   bookingReference?: string; // PNR or Reservation #
+  cancellationPolicy?: string; // NEW
 }
 
 export interface FlightService extends ServiceBase {
@@ -295,15 +315,34 @@ export interface FlightService extends ServiceBase {
   to: string;   // IATA Code or City
   departureDate: string;
   departureTimeSlot?: 'MORNING' | 'AFTERNOON' | 'EVENING';
-  exactDepartureTime?: string; // Actual time
+  
+  // Updated: Explicit preferred times for Employee Request
+  preferredDepartureTime?: string; 
+  preferredArrivalTime?: string;
+
+  exactDepartureTime?: string; // Actual time (ADS/Booking)
+  exactArrivalTime?: string; // NEW: Actual Arrival time (ADS/Booking)
   returnDate?: string;
   returnTimeSlot?: 'MORNING' | 'AFTERNOON' | 'EVENING';
-  exactReturnTime?: string; // Actual time
+  
+  preferredReturnTime?: string; // NEW: For Employee
+  exactReturnTime?: string; // Actual time (ADS/Booking)
+  
   flightClass: 'Economy' | 'Premium Economy' | 'Business' | 'First';
   airlinePreference?: string;
   flightNumber?: string; // Actual Flight
   frequentFlyerNumber?: string;
   durationHours?: number; // Added for Policy Check (Rule 1.2.2)
+  
+  // NEW: Baggage & Meal
+  needExtraBaggage?: boolean; // NEW: Checkbox for low cost
+  baggageWeight?: number; // kg
+  mealIncluded?: boolean;
+
+  // NEW: ADS Detailed Fields
+  ticketNumber?: string; 
+  seatNumber?: string;
+  fareRules?: string; // e.g. "Non-Refundable", "Change 2000 THB"
 }
 
 export interface HotelService extends ServiceBase {
@@ -315,8 +354,13 @@ export interface HotelService extends ServiceBase {
   checkOut: string;
   roomType: 'Standard' | 'Deluxe' | 'Suite' | 'Executive';
   guests: number;
+  roomCount?: number; // NEW
   breakfastIncluded: boolean;
   specialRequests?: string;
+
+  // NEW: ADS Detailed Fields
+  confirmationNumber?: string;
+  bedType?: 'Single' | 'Double' | 'Twin' | 'King';
 }
 
 export interface CarService extends ServiceBase {
@@ -327,9 +371,17 @@ export interface CarService extends ServiceBase {
   pickupTime: string;
   dropoffDate: string;
   dropoffTime: string;
-  carType: 'Eco' | 'Sedan' | 'SUV' | 'Van' | 'Luxury';
+  carType: 'Eco' | 'Sedan' | 'SUV' | 'Van' | 'Luxury' | 'Personal Car (Mileage)';
   driverIncluded: boolean;
   mileageDistance?: number; // For Personal Car mileage claim (Rule 2.2.2)
+  vendor?: string; // NEW: Rental Company
+
+  // NEW: ADS Detailed Fields
+  driverName?: string;
+  driverContact?: string;
+  vehicleDetails?: string; // License Plate
+  exactPickupTime?: string; // NEW: Confirmed ISO DateTime
+  exactDropoffTime?: string; // NEW: Confirmed ISO DateTime
 }
 
 export interface InsuranceService extends ServiceBase {
@@ -338,6 +390,11 @@ export interface InsuranceService extends ServiceBase {
   startDate: string;
   endDate: string;
   notes?: string;
+  policyNumber?: string;
+  
+  // NEW: Requested Specific Fields
+  plan?: string; // Hip Hop, Boogie, etc.
+  beneficiary?: string; // Name & Relationship
 }
 
 export interface EventService extends ServiceBase {
@@ -349,12 +406,46 @@ export interface EventService extends ServiceBase {
   notes?: string;
 }
 
-export type TravelServiceItem = FlightService | HotelService | CarService | InsuranceService | EventService;
+export interface TrainService extends ServiceBase {
+  type: 'TRAIN';
+  from: string;
+  to: string;
+  departureDate: string;
+  departureTime?: string;
+  arrivalDate?: string;
+  arrivalTime?: string;
+  trainNumber?: string;
+  class?: string; // e.g., 1st Class, Sleeper
+  ticketType?: string;
+  
+  exactDepartureTime?: string; // NEW
+  exactArrivalTime?: string; // NEW
+}
+
+export interface BusService extends ServiceBase {
+  type: 'BUS';
+  from: string;
+  to: string;
+  departureDate: string;
+  departureTime?: string;
+  arrivalDate?: string;
+  arrivalTime?: string;
+  company?: string;
+  class?: string; // e.g., VIP 24
+  seatNumber?: string;
+  
+  exactDepartureTime?: string; // NEW
+  exactArrivalTime?: string; // NEW
+}
+
+export type TravelServiceItem = FlightService | HotelService | CarService | InsuranceService | EventService | TrainService | BusService;
 
 // --- Quotation Options (New) ---
 export interface QuotationOption {
     id: string;
     name: string; // e.g. "Option 1: Thai Airways", "Option 2: Emirates"
+    quoteRef?: string; // Vendor Quote Reference ID
+    validUntil?: string; // Quote Validity
     totalAmount: number;
     services: TravelServiceItem[]; // Detailed services for this specific option
     isSelected: boolean;
@@ -393,6 +484,7 @@ export interface TravelerDetails {
   passportNumber?: string; // For International
   passportExpiry?: string;
   nationalId?: string; // For Domestic Flights (sometimes required)
+  address?: string; // NEW: For Insurance
   
   // Added for Policy Logic
   jobGrade?: number; // e.g., 10, 13
@@ -409,6 +501,7 @@ export interface TripSummary {
   justification: string;
   projectCode: string;
   costCenter: string;
+  billableTo?: string; // NEW: Matches paper form "Budget to be reclaimed from"
 }
 
 export interface TravelRequest {
@@ -443,6 +536,11 @@ export interface TravelRequest {
   
   policyFlags?: string[];
   policyExceptionReason?: string; // If ADS overrides policy
+
+  // --- Workflow & Security ---
+  approvalHistory?: ApprovalLog[]; // Immutable audit trail of approvals
+  currentApproverRole?: string; // 'Line Manager', 'Department Head', 'CFO'
+  requiredApprovalChain?: string[]; // Snapshotted chain required for this request
 }
 
 // Generic Data container for Chat Actions

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     Save, RefreshCw, Shield, Server, Users, Trash2, Check, X, Palette, 
@@ -299,7 +298,7 @@ export const PolicySettings: React.FC = () => {
              <div className="p-4 border rounded-xl bg-slate-50 flex flex-col h-96">
                 <div className="flex justify-between items-center mb-3">
                     <h4 className="font-bold text-slate-700 flex items-center gap-2"><Briefcase size={16}/> Projects ({projects.length})</h4>
-                    <button onClick={() => addList(projects, { code: `PRJ-${Date.now()}`, name: 'New Project', manager: 'Manager', budget: 0, spent: 0, status: 'Active' }, setProjects)} className="text-xs bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 flex items-center gap-1"><Plus size={12}/> Add</button>
+                    <button onClick={() => addList(projects, { code: `PRJ-${Date.now()}`, name: 'New Project', manager: 'Manager', budget: 0, spent: 0, status: 'Active' as const }, setProjects)} className="text-xs bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 flex items-center gap-1"><Plus size={12}/> Add</button>
                 </div>
                 <div className="overflow-y-auto space-y-2 pr-2 flex-1">
                     {projects.map((proj, idx) => (

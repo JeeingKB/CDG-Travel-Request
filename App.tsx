@@ -5,19 +5,20 @@ import { Dashboard } from './components/Dashboard';
 import { NewRequestForm } from './components/NewRequestForm';
 import { ChatAssistant } from './components/ChatAssistant';
 import { ProcessRequestModal } from './components/ProcessRequestModal';
+import { BookingConfirmationModal } from './components/BookingConfirmationModal'; // NEW
 import { PolicySettings } from './components/PolicySettings'; 
 import { RequestList } from './components/RequestList'; 
 import { ApprovalModal } from './components/ApprovalModal';
 import { QuotationSelectionModal } from './components/QuotationSelectionModal';
-import { LoginPage } from './components/LoginPage'; // NEW
-import { AuthProvider, useAuth } from './contexts/AuthContext'; // NEW
+import { LoginPage } from './components/LoginPage'; 
+import { AuthProvider, useAuth } from './contexts/AuthContext'; 
 import { TravelRequest, ViewState, RequestStatus } from './types';
 import { storageService } from './services/storage';
 import { calculateSLADeadline } from './services/slaService'; 
 import { LanguageProvider } from './services/translations'; 
 
 function AppContent() {
-  const { user, isLoading: authLoading, userRole } = useAuth(); // Get real user state
+  const { user, isLoading: authLoading, userRole } = useAuth(); 
   const [view, setView] = useState<ViewState>('DASHBOARD');
   const [requests, setRequests] = useState<TravelRequest[]>([]);
   const [editingRequest, setEditingRequest] = useState<Partial<TravelRequest> | null>(null);
@@ -26,6 +27,7 @@ function AppContent() {
   
   // ADS Workflow State
   const [processingRequest, setProcessingRequest] = useState<TravelRequest | null>(null);
+  const [bookingRequest, setBookingRequest] = useState<TravelRequest | null>(null); // NEW: For Final Booking
   
   // Manager Workflow State
   const [reviewingRequest, setReviewingRequest] = useState<TravelRequest | null>(null);
@@ -35,7 +37,7 @@ function AppContent() {
 
   // Load data (CRUD: Read)
   useEffect(() => {
-    if (!user) return; // Only load if logged in
+    if (!user) return; 
 
     const loadData = async () => {
         setIsLoading(true);
@@ -44,7 +46,7 @@ function AppContent() {
         setIsLoading(false);
     };
     loadData();
-  }, [user]); // Reload when user logs in
+  }, [user]); 
 
   // CRUD: Create / Update
   const handleSaveRequest = async (request: TravelRequest, keepOpen: boolean = false) => {
@@ -58,7 +60,8 @@ function AppContent() {
         setView('DASHBOARD');
         setEditingRequest(null);
         setProcessingRequest(null); 
-        setSelectionRequest(null); // Close selection modal if open
+        setSelectionRequest(null);
+        setBookingRequest(null); // Close booking modal
     } else {
         if (processingRequest && processingRequest.id === request.id) {
             setProcessingRequest(request);
@@ -71,7 +74,6 @@ function AppContent() {
 
   // Direct Create from Chat
   const handleCreateFromChat = async (draftData: Partial<TravelRequest>): Promise<TravelRequest> => {
-      // Use sequential ID generation
       const newId = await storageService.generateNextRequestId();
       const submissionTime = new Date().toISOString();
       
@@ -98,7 +100,6 @@ function AppContent() {
       return newRequest;
   };
   
-  // NEW: Update Status from Chat
   const handleStatusUpdateFromChat = async (id: string, newStatus: string): Promise<TravelRequest | null> => {
       const req = requests.find(r => r.id === id);
       if (!req) return null;
@@ -121,10 +122,8 @@ function AppContent() {
       return null;
   };
 
-  // CRUD: Delete
   const handleDeleteRequest = async (id: string) => {
     if (window.confirm('Delete this request?')) {
-      // Optimistic Update: Remove from UI immediately
       setRequests(prev => prev.filter(r => r.id !== id));
       
       try {
@@ -187,13 +186,20 @@ function AppContent() {
       const updatedReq: TravelRequest = {
           ...req,
           quotations: updatedQuotes,
-          services: selectedOption.services, // Apply selected services to main record
-          actualCost: selectedOption.totalAmount, // Update actual cost
+          services: selectedOption.services, 
+          actualCost: selectedOption.totalAmount, 
           status: RequestStatus.PENDING_APPROVAL
       };
       
       await handleSaveRequest(updatedReq);
       setSelectionRequest(null);
+  };
+
+  // --- ADS Booking Confirmation Handler ---
+  const handleConfirmBooking = async (req: TravelRequest) => {
+      const updated = { ...req, status: RequestStatus.BOOKED };
+      await handleSaveRequest(updated);
+      setBookingRequest(null);
   };
 
   // --- AUTH GUARD ---
@@ -219,8 +225,9 @@ function AppContent() {
           requests={requests}
           onEdit={handleEditRequest}
           onDelete={handleDeleteRequest}
-          role={userRole} // USE REAL ROLE
+          role={userRole} 
           onProcessRequest={(req) => setProcessingRequest(req)}
+          onBookRequest={(req) => setBookingRequest(req)} // Pass handler
           onViewAllRequests={() => setView('MY_REQUESTS')}
           onReview={(req) => setReviewingRequest(req)}
         />
@@ -282,6 +289,14 @@ function AppContent() {
               request={selectionRequest}
               onClose={() => setSelectionRequest(null)}
               onSelect={handleEmployeeSelection}
+          />
+      )}
+
+      {bookingRequest && (
+          <BookingConfirmationModal
+              request={bookingRequest}
+              onClose={() => setBookingRequest(null)}
+              onConfirm={handleConfirmBooking}
           />
       )}
     </Layout>

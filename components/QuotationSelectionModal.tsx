@@ -4,6 +4,8 @@ import { X, CheckCircle, Info } from 'lucide-react';
 import { TravelRequest } from '../types';
 import { formatCurrency } from '../utils/formatters'; // Shared
 import { ServiceIcon } from './common/ServiceIcon'; // Shared
+import { workflowService } from '../services/workflowService';
+import { useAuth } from '../contexts/AuthContext';
 
 interface QuotationSelectionModalProps {
   request: TravelRequest;
@@ -12,6 +14,7 @@ interface QuotationSelectionModalProps {
 }
 
 export const QuotationSelectionModal: React.FC<QuotationSelectionModalProps> = ({ request, onClose, onSelect }) => {
+  const { employeeDetails } = useAuth();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   if (!request.quotations || request.quotations.length === 0) {
@@ -19,8 +22,13 @@ export const QuotationSelectionModal: React.FC<QuotationSelectionModalProps> = (
   }
 
   const handleConfirm = () => {
-      if (selectedId) {
-          onSelect(request, selectedId);
+      if (selectedId && employeeDetails) {
+          // Initialize chain before passing back to parent
+          const selectedOption = request.quotations?.find(q => q.id === selectedId);
+          if (selectedOption) {
+              const reqWithChain = workflowService.initializeApprovalChain(request, employeeDetails, selectedOption.totalAmount);
+              onSelect(reqWithChain, selectedId);
+          }
       }
   };
 

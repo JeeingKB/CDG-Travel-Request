@@ -1,13 +1,13 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
     Plus, Plane, FileText, CheckCircle, Clock, Inbox, Mail, 
     AlertTriangle, ArrowRight, ShieldCheck, Download, Printer, 
     ChevronDown, Users, Pencil, Trash2, FileSearch, MousePointerClick,
-    Briefcase, Wallet, Ban, Server, Activity
+    Briefcase, Wallet, Ban, Server, Activity, BarChart3, BookmarkCheck, BellRing, User, UploadCloud, FileSpreadsheet
 } from 'lucide-react';
 import { StatCard } from './StatCard';
-import { TravelRequest, RequestStatus, RequestFor, UserRole } from '../types';
+import { TravelRequest, RequestStatus, RequestFor, UserRole, TravelerDetails } from '../types';
 import { getSLAStatus } from '../services/slaService';
 import { exportService } from '../services/exportService';
 import { useTranslation } from '../services/translations';
@@ -15,6 +15,8 @@ import { StatusBadge } from './common/StatusBadge';
 import { formatCurrency, formatDate, formatRequestId } from '../utils/formatters'; 
 import { getTravelTypeStyle } from '../utils/styleHelpers'; 
 import { storageService } from '../services/storage';
+import { ServiceIcon } from './common/ServiceIcon'; 
+import { useAuth } from '../contexts/AuthContext'; 
 
 // --- Print Components ---
 const PrintSingleTicket: React.FC<{ request: TravelRequest }> = ({ request }) => {
@@ -47,7 +49,27 @@ const PrintSingleTicket: React.FC<{ request: TravelRequest }> = ({ request }) =>
           <div><span className="font-bold">Cost Center:</span> {request.trip.costCenter || 'N/A'}</div>
         </div>
       </div>
-      {/* ... Rest of Print Ticket (Same as before) ... */}
+      
+      <div className="mb-8">
+          <h3 className="font-bold border-b border-slate-200 pb-2 mb-2">Trip Details</h3>
+          <table className="w-full text-sm">
+              <tbody>
+                  <tr>
+                      <td className="py-1 font-bold w-32">Destination:</td>
+                      <td>{request.trip.destination}</td>
+                  </tr>
+                  <tr>
+                      <td className="py-1 font-bold">Duration:</td>
+                      <td>{formatDate(request.trip.startDate)} - {formatDate(request.trip.endDate)}</td>
+                  </tr>
+                  <tr>
+                      <td className="py-1 font-bold">Purpose:</td>
+                      <td>{request.trip.purpose}</td>
+                  </tr>
+              </tbody>
+          </table>
+      </div>
+
       <div className="mt-8 pt-4 border-t text-center text-xs text-slate-400">
           {settings.docTemplates.footerText}
       </div>
@@ -62,91 +84,93 @@ interface DashboardProps {
   onEdit: (req: TravelRequest) => void;
   onDelete: (id: string) => void;
   role?: UserRole;
-  onProcessRequest?: (req: TravelRequest) => void; 
+  onProcessRequest?: (req: TravelRequest) => void;
+  onBookRequest?: (req: TravelRequest) => void; 
   onViewAllRequests: () => void;
   onReview?: (req: TravelRequest) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-    onRequestNew, requests, onEdit, onDelete, role = 'Employee', onProcessRequest, onViewAllRequests, onReview
+    onRequestNew, requests, onEdit, onDelete, role = 'Employee', onProcessRequest, onBookRequest, onViewAllRequests, onReview
 }) => {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<'ALL' | 'INBOX'>('INBOX');
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-  const [printRequest, setPrintRequest] = useState<TravelRequest | null>(null);
+  const { user } = useAuth();
   
-  // Load settings for Dashboard Config
+  // Set default tab based on Role
+  const [activeTab, setActiveTab] = useState<'MY_REQUESTS' | 'TEAM_INBOX' | 'ALL'>('MY_REQUESTS');
+  
+  // Initialize tab once when role changes
+  React.useEffect(() => {
+      if (role === 'ADS') setActiveTab('TEAM_INBOX');
+      else if (role === 'Manager') setActiveTab('TEAM_INBOX'); // "Approvals"
+      else setActiveTab('MY_REQUESTS');
+  }, [role]);
+
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  const [printRequest, setPrintRequest] = useState<TravelRequest | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Load settings
   const settings = storageService.getSettings();
   const { dashboardConfig } = settings;
 
-  // --- Memoized Data Logic (Performance) ---
+  // --- Filter Logic ---
   const { 
     myRequests, 
-    recentRequests, 
-    pendingApprovals, 
-    adsInbox, 
-    adsDisplayData, 
-    waitingSelection,
-    stats 
+    teamInboxRequests, 
+    stats,
+    dailyVolumes 
   } = useMemo(() => {
-    // 1. Role-based filtering
-    const isEmployee = role === 'Employee';
-    const isManager = role === 'Manager';
-    const isPresident = role === 'President';
-    const isApprover = isManager || isPresident;
-    const isIT = role === 'IT_ADMIN';
+    // 1. My Requests (Always strictly my own)
+    const myReqs = requests.filter(r => r.requesterId === user?.id)
+        .sort((a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime());
 
-    // My Requests (For Employee View)
-    const myReqs = requests.filter(r => r.requesterId === 'EMP001' || (!isEmployee && !isApprover && !isIT)); 
-
-    // Recent Requests (For Table)
-    const recent = [...requests]
-        .filter(r => isEmployee ? r.requesterId === 'EMP001' : true) // Employees see only theirs
-        .sort((a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime())
-        .slice(0, 5);
-
-    // Approver: Pending Approvals
-    // President sees all pending high-value items, Manager sees their team
-    const pending = requests.filter(r => {
-        if (r.status !== RequestStatus.PENDING_APPROVAL) return false;
-        if (isPresident) return (r.estimatedCost || 0) > 50000; // Only see high value? Or all? Let's say all for now.
-        return true;
-    });
+    // 2. Team Inbox (Work items for ADS/Manager)
+    let teamReqs: TravelRequest[] = [];
     
-    // Employee: Waiting Selection
-    const waiting = requests.filter(r => r.status === RequestStatus.WAITING_EMPLOYEE_SELECTION && (isEmployee ? r.requesterId === 'EMP001' : true));
-    
-    // ADS: Inbox
-    const inbox = requests.filter(r => r.status === RequestStatus.SUBMITTED || r.status === RequestStatus.QUOTATION_PENDING);
-    const display = activeTab === 'ALL' ? requests : inbox;
+    if (role === 'ADS') {
+        // ADS sees: Submitted (needs quote), Quotation Pending (needs follow up), Approved (needs booking)
+        teamReqs = requests.filter(r => 
+            r.status === RequestStatus.SUBMITTED || 
+            r.status === RequestStatus.QUOTATION_PENDING ||
+            r.status === RequestStatus.APPROVED 
+        ).sort((a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime());
+    } else if (role === 'Manager' || role === 'President') {
+        // Approver sees: Pending Approval assigned to them
+        teamReqs = requests.filter(r => {
+            if (r.status !== RequestStatus.PENDING_APPROVAL) return false;
+            // Check if current role matches
+            // In real app, check 'currentApproverRole' vs userRole map
+            const waitingRole = r.currentApproverRole;
+            if (role === 'Manager' && (waitingRole === 'Line Manager' || waitingRole === 'Department Head')) return true;
+            if (role === 'President' && (waitingRole === 'CFO' || waitingRole === 'President' || waitingRole === 'GM')) return true;
+            return false;
+        }).sort((a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime());
+    } else if (role === 'IT_ADMIN') {
+        teamReqs = requests; // Sees all
+    }
 
-    // --- Stats Calculation ---
+    // --- Stats ---
     const processedCount = requests.filter(r => 
-        r.status === RequestStatus.APPROVED || 
-        r.status === RequestStatus.REJECTED || 
         r.status === RequestStatus.BOOKED || 
-        r.status === RequestStatus.COMPLETED
+        r.status === RequestStatus.COMPLETED ||
+        r.status === RequestStatus.REJECTED
     ).length;
 
     const policyFlagCount = requests.filter(r => r.policyFlags && r.policyFlags.length > 0).length;
-    
-    // Active Trips: Not Draft, Not Completed, Not Rejected
     const activeTripCount = requests.filter(r => r.status !== RequestStatus.DRAFT && r.status !== RequestStatus.COMPLETED && r.status !== RequestStatus.REJECTED).length;
-    
-    // Spend: Use Actual if available, else Est
     const totalSpend = requests.reduce((sum, r) => sum + (Number(r.actualCost || r.estimatedCost) || 0), 0);
 
-    // --- REAL SLA CALCULATION ---
+    // SLA
     const activeRequestsForSLA = requests.filter(r => 
         r.status !== RequestStatus.DRAFT && 
         r.status !== RequestStatus.COMPLETED && 
         r.status !== RequestStatus.REJECTED &&
         r.status !== RequestStatus.BOOKED
     );
-    
     const totalActiveForSLA = activeRequestsForSLA.length;
     let slaCompliance: number | null = null;
-
     if (totalActiveForSLA > 0) {
         const breachedCount = activeRequestsForSLA.filter(r => {
             const sla = getSLAStatus(r.slaDeadline, r.status);
@@ -155,22 +179,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
         slaCompliance = ((totalActiveForSLA - breachedCount) / totalActiveForSLA) * 100;
     }
 
+    // Daily Volumes (ADS only)
+    const dailyVolumes: Record<string, number> = {};
+    if (role === 'ADS') {
+        const today = new Date();
+        for(let i=6; i>=0; i--) {
+            const d = new Date(today);
+            d.setDate(today.getDate() - i);
+            const key = d.toISOString().split('T')[0];
+            dailyVolumes[key] = 0;
+        }
+        requests.forEach(r => {
+            if (r.submittedAt) {
+                const dateKey = r.submittedAt.split('T')[0];
+                if (dailyVolumes[dateKey] !== undefined) dailyVolumes[dateKey]++;
+                else dailyVolumes[dateKey] = (dailyVolumes[dateKey] || 0) + 1;
+            }
+        });
+    }
+
     return { 
         myRequests: myReqs, 
-        recentRequests: recent, 
-        pendingApprovals: pending, 
-        waitingSelection: waiting,
-        adsInbox: inbox, 
-        adsDisplayData: display,
+        teamInboxRequests: teamReqs,
+        dailyVolumes,
         stats: {
             processed: processedCount,
             flags: policyFlagCount,
             activeTrips: activeTripCount,
             spend: totalSpend,
-            slaCompliance: slaCompliance // Can be null
+            slaCompliance: slaCompliance
         }
     };
-  }, [requests, role, activeTab]);
+  }, [requests, role, user]);
 
   const handlePrint = (req?: TravelRequest) => {
       setPrintRequest(req || null);
@@ -178,8 +218,66 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setTimeout(() => window.print(), 300);
   };
 
-  const isApprover = role === 'Manager' || role === 'President';
-  const isIT = role === 'IT_ADMIN';
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          try {
+              const importedPartials = await exportService.parseRequestCSV(file);
+              if (importedPartials.length > 0) {
+                  // Get master data to fill in names
+                  const employees = await storageService.getEmployees();
+                  
+                  // Convert partials to full requests and save
+                  for (const partial of importedPartials) {
+                      const newId = await storageService.generateNextRequestId();
+                      
+                      // Resolve requester name from ID
+                      const employee = employees.find(emp => emp.id === partial.requesterId);
+                      const requesterName = employee ? employee.name : 'Imported User';
+                      
+                      const fullRequest: TravelRequest = {
+                          ...partial,
+                          id: newId,
+                          requesterName: requesterName,
+                          travelers: employee ? [employee] : [{
+                              id: partial.requesterId || 'UNK',
+                              name: requesterName,
+                              type: 'Employee',
+                              title: 'Mr.',
+                              department: employee?.department || 'Unknown',
+                              jobGrade: employee?.jobGrade || 10,
+                              position: employee?.position || 'Staff'
+                          } as TravelerDetails],
+                          services: partial.services || [],
+                          submittedAt: new Date().toISOString()
+                      } as TravelRequest;
+                      
+                      await storageService.saveRequest(fullRequest);
+                  }
+                  
+                  alert(`Successfully imported ${importedPartials.length} requests as Drafts.`);
+                  window.location.reload(); // Simple refresh to show new data
+              }
+          } catch (error) {
+              console.error(error);
+              alert("Failed to parse CSV. Please check the format.");
+          }
+      }
+      setIsImportMenuOpen(false);
+      e.target.value = ''; // Reset input
+  };
+
+  // Decide which list to show based on tab
+  const displayRequests = activeTab === 'MY_REQUESTS' ? myRequests : 
+                          activeTab === 'TEAM_INBOX' ? teamInboxRequests :
+                          requests; // ALL
+
+  // Tab Definitions
+  const tabs = [
+      { id: 'MY_REQUESTS', label: t('my_requests'), count: myRequests.length, icon: User },
+      { id: 'TEAM_INBOX', label: role === 'ADS' ? 'Inbox (Action)' : 'Waiting Approval', count: teamInboxRequests.length, icon: Inbox, hidden: role === 'Employee' },
+      { id: 'ALL', label: 'All History', count: requests.length, icon: FileSearch, hidden: role === 'Employee' }
+  ];
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 animate-fade-in pb-24 print:p-0 print:max-w-none print:bg-white">
@@ -190,19 +288,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <p className="text-slate-500 mt-1 flex items-center gap-2">
               {t('role')}: <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase 
                 ${role === 'ADS' ? 'bg-purple-100 text-purple-700' : 
-                  isIT ? 'bg-red-100 text-red-700' :
-                  isApprover ? 'bg-orange-100 text-orange-700' : 
+                  role === 'IT_ADMIN' ? 'bg-red-100 text-red-700' :
+                  (role === 'Manager' || role === 'President') ? 'bg-orange-100 text-orange-700' : 
                   'bg-blue-100 text-blue-700'}`}>
                     {role.replace('_', ' ')}
               </span> 
-              • {t('dash.costCenter')}: CC-GEN-001
+              • {t('dash.costCenter')}: {user?.id || 'CC-GEN'}
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 relative">
+          {/* IMPORT BUTTON */}
+          <div className="relative">
+              <button 
+                onClick={() => setIsImportMenuOpen(!isImportMenuOpen)}
+                className="flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-3 rounded-xl font-medium transition-all shadow-sm hover:bg-slate-50 hover:shadow-md"
+              >
+                <UploadCloud size={20} />
+                Import
+              </button>
+              {isImportMenuOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-fade-in-up">
+                      <button onClick={() => fileInputRef.current?.click()} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-2 text-sm text-slate-700 font-bold">
+                          <FileSpreadsheet size={16}/> Upload CSV
+                      </button>
+                      <button onClick={() => { exportService.downloadRequestTemplate(); setIsImportMenuOpen(false); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-2 text-sm text-slate-500">
+                          <Download size={16}/> Download Template
+                      </button>
+                  </div>
+              )}
+              <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImportFile} />
+          </div>
+
           <button
             onClick={onRequestNew}
-            className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-medium transition-all shadow-lg hover:shadow-xl active:scale-95 bg-primary hover:opacity-90"
-            aria-label="Create New Request"
+            className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-medium transition-all shadow-lg hover:shadow-xl active:scale-95 hover:opacity-90"
           >
             <Plus size={20} />
             {t('dash.btn.create')}
@@ -210,158 +329,243 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* --- STATS GRID (Dynamic based on Settings) --- */}
+      {/* --- STATS GRID --- */}
       {dashboardConfig.showStats && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 print:hidden">
             {role === 'ADS' && (
                 <>
-                    <StatCard label={t('dash.stat.newReq')} value={adsInbox.length.toString()} icon={Inbox} color="blue" />
-                    <StatCard label={t('dash.stat.pendingQuote')} value={requests.filter(r => r.status === RequestStatus.QUOTATION_PENDING).length.toString()} icon={Mail} color="orange" />
-                    <StatCard label={t('dash.stat.processed')} value={stats.processed.toString()} icon={CheckCircle} color="green" />
-                    <StatCard label={t('dash.stat.slaCompliance')} value={stats.slaCompliance !== null ? `${stats.slaCompliance.toFixed(1)}%` : "N/A"} icon={Clock} color="purple" />
+                    <StatCard label={t('dash.stat.newReq')} value={teamInboxRequests.filter(r => r.status === RequestStatus.SUBMITTED).length.toString()} icon={Inbox} color="blue" />
+                    <StatCard label="Ready to Book" value={teamInboxRequests.filter(r => r.status === RequestStatus.APPROVED).length.toString()} icon={BookmarkCheck} color="green" trend="Action Needed" />
+                    <StatCard label={t('dash.stat.processed')} value={stats.processed.toString()} icon={CheckCircle} color="purple" />
+                    <StatCard label={t('dash.stat.slaCompliance')} value={stats.slaCompliance !== null ? `${stats.slaCompliance.toFixed(1)}%` : "N/A"} icon={Clock} color="orange" />
                 </>
             )}
             
             {role === 'Employee' && (
                 <>
                     <StatCard label={t('dash.stat.activeTrips')} value={stats.activeTrips.toString()} icon={Plane} color="blue" />
-                    {waitingSelection.length > 0 ? (
-                        <StatCard label="Action Required" value={waitingSelection.length.toString() + " Pending Selection"} icon={MousePointerClick} color="red" trend="Urgent" />
-                    ) : (
-                        <StatCard label={t('dash.stat.approvalsWaiting')} value={myRequests.filter(r => r.status === RequestStatus.PENDING_APPROVAL).length.toString()} icon={Clock} color="orange" />
-                    )}
-                    <StatCard label={t('dash.stat.totalSpend')} value={formatCurrency(stats.spend)} icon={FileText} color="purple" />
                     <StatCard label="Drafts" value={myRequests.filter(r => r.status === RequestStatus.DRAFT).length.toString()} icon={Pencil} color="green" />
+                    <StatCard label={t('dash.stat.totalSpend')} value={formatCurrency(stats.spend)} icon={FileText} color="purple" />
+                    <StatCard label="Completed" value={myRequests.filter(r => r.status === RequestStatus.COMPLETED).length.toString()} icon={CheckCircle} color="orange" />
                 </>
             )}
 
-            {isApprover && (
+            {(role === 'Manager' || role === 'President') && (
                 <>
-                    <StatCard label={t('dash.stat.approvalsWaiting')} value={pendingApprovals.length.toString()} icon={ShieldCheck} color="orange"/>
-                    <StatCard label="Department Active Trips" value={stats.activeTrips.toString()} icon={Briefcase} color="blue" />
-                    <StatCard label="Department Spend (YTD)" value={formatCurrency(stats.spend)} icon={Wallet} color="purple" />
-                    <StatCard label="Rejected Requests" value={requests.filter(r => r.status === RequestStatus.REJECTED).length.toString()} icon={Ban} color="red" />
+                    <StatCard label={t('dash.stat.approvalsWaiting')} value={teamInboxRequests.length.toString()} icon={ShieldCheck} color="orange" trend={teamInboxRequests.length > 0 ? 'Action Needed' : ''}/>
+                    <StatCard label="Department Active" value={stats.activeTrips.toString()} icon={Briefcase} color="blue" />
+                    <StatCard label="Department Spend" value={formatCurrency(stats.spend)} icon={Wallet} color="purple" />
+                    <StatCard label="Rejected" value={requests.filter(r => r.status === RequestStatus.REJECTED).length.toString()} icon={Ban} color="red" />
                 </>
             )}
+          </div>
+      )}
 
-            {isIT && (
-                <>
-                     <StatCard label="System Health" value="99.9%" icon={Activity} color="green" />
-                     <StatCard label="Total Requests (DB)" value={requests.length.toString()} icon={Server} color="blue" />
-                     <StatCard label="Active Users" value="12" icon={Users} color="purple" />
-                     <StatCard label="Failed API Calls" value="0" icon={AlertTriangle} color="red" />
-                </>
-            )}
+      {/* --- ADS DAILY VOLUME WIDGET --- */}
+      {role === 'ADS' && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 print:hidden">
+              <div className="flex items-center gap-2 mb-4">
+                  <BarChart3 className="text-slate-400" size={20}/>
+                  <h3 className="font-bold text-slate-800">📅 Daily Request Volume (Last 7 Days)</h3>
+              </div>
+              <div className="flex items-end justify-between gap-2 h-32 pt-4">
+                  {Object.entries(dailyVolumes).sort().slice(-7).map(([date, count]: [string, any]) => (
+                      <div key={date} className="flex-1 flex flex-col items-center gap-2 group">
+                          <div className="relative w-full flex items-end justify-center h-full bg-slate-50 rounded-lg overflow-hidden group-hover:bg-blue-50 transition-colors">
+                              <div 
+                                className="w-full bg-blue-500 rounded-t-lg transition-all duration-500 relative min-h-[4px]" 
+                                style={{ height: `${Math.max(5, Math.min(100, count * 15))}%` }}
+                              >
+                                  {count > 0 && (
+                                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-bold text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          {count}
+                                      </div>
+                                  )}
+                              </div>
+                          </div>
+                          <span className="text-[10px] font-medium text-slate-400 uppercase">
+                              {new Date(date).toLocaleDateString('en-GB', { weekday: 'short' })}
+                          </span>
+                      </div>
+                  ))}
+              </div>
           </div>
       )}
 
       {/* --- MAIN CONTENT AREA --- */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden min-h-[400px]">
+          
+          {/* Tabs Toolbar */}
+          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-4 print:hidden bg-slate-50/50">
+              <div className="flex gap-2 p-1 bg-white border border-slate-200 rounded-xl overflow-x-auto max-w-full">
+                {tabs.filter(t => !t.hidden).map(tab => (
+                    <button 
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className={`px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 whitespace-nowrap
+                            ${activeTab === tab.id 
+                                ? 'bg-slate-900 text-white shadow-md' 
+                                : 'text-slate-500 hover:bg-slate-100'}`}
+                    >
+                        <tab.icon size={16}/>
+                        {tab.label}
+                        {tab.count > 0 && (
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                {tab.count}
+                            </span>
+                        )}
+                    </button>
+                ))}
+              </div>
 
-      {/* ADS Workbench */}
-      {role === 'ADS' && (
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden min-h-[400px]">
-              {/* Toolbar */}
-              <div className="p-4 border-b border-slate-100 flex justify-between items-center print:hidden">
-                  <div className="flex gap-4">
-                    {(['INBOX', 'ALL'] as const).map(tab => (
-                        <button 
-                            key={tab}
-                            onClick={() => setActiveTab(tab)}
-                            className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${activeTab === tab ? 'bg-primary text-white' : 'text-slate-500 hover:bg-slate-50'}`}
-                        >
-                            {tab === 'INBOX' ? `${t('dash.ads.tab.inbox')} (${adsInbox.length})` : t('dash.ads.tab.all')}
-                        </button>
-                    ))}
-                  </div>
-                  {/* Export... */}
-                  <div className="relative">
-                      <button onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-bold"><Download size={16}/> {t('dash.ads.export')}</button>
-                       {isExportMenuOpen && (
-                          <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-fade-in-up">
-                              <button onClick={() => { exportService.toCSV(adsDisplayData); setIsExportMenuOpen(false); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-2 text-sm text-slate-700"><FileText size={16}/> CSV</button>
-                              <button onClick={() => handlePrint()} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-2 text-sm text-slate-900 font-bold"><Printer size={16}/> Print</button>
-                          </div>
-                      )}
-                  </div>
-              </div>
-              
-              {/* List */}
-              <div className="p-0">
-                  {adsDisplayData.length === 0 && <div className="p-16 text-center text-slate-400">Caught Up</div>}
-                  {adsDisplayData.map(req => (
-                      <div key={req.id} className="p-5 border-b border-slate-50 flex justify-between items-center hover:bg-slate-50 transition-colors">
-                          <div className="flex items-center gap-4">
-                              <div className={`p-3 rounded-full ${req.status === RequestStatus.SUBMITTED ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
-                                {req.status === RequestStatus.SUBMITTED ? <Inbox size={20}/> : <Mail size={20}/>}
-                              </div>
-                              <div>
-                                  <h3 className="font-bold text-slate-800">{req.trip.destination} <span className="text-slate-400 font-normal">#{req.id}</span></h3>
-                                  <p className="text-sm text-slate-500">{req.requesterName} • {formatDate(req.trip.startDate)}</p>
-                              </div>
-                          </div>
-                          <div className="flex gap-3 items-center">
-                              <StatusBadge status={req.status}/>
-                              <button onClick={() => onProcessRequest?.(req)} className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:opacity-90">Process</button>
-                          </div>
+              {/* Export Button (Only for List Views) */}
+              <div className="relative">
+                  <button onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-bold shadow-sm transition-all">
+                      <Download size={16}/> {t('dash.ads.export')}
+                  </button>
+                   {isExportMenuOpen && (
+                      <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-fade-in-up">
+                          <button onClick={() => { exportService.toCSV(displayRequests); setIsExportMenuOpen(false); }} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-2 text-sm text-slate-700"><FileText size={16}/> CSV</button>
+                          <button onClick={() => handlePrint()} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-2 text-sm text-slate-900 font-bold"><Printer size={16}/> Print View</button>
                       </div>
-                  ))}
-              </div>
-               {/* Print View Logic */}
-              <div className="hidden print:block p-8">
-                  {printRequest && <PrintSingleTicket request={printRequest} />}
+                  )}
               </div>
           </div>
-      )}
+          
+          {/* List Content */}
+          <div className="overflow-x-auto">
+              {displayRequests.length === 0 ? (
+                  <div className="p-16 text-center text-slate-400 flex flex-col items-center gap-3">
+                      <Inbox size={48} className="opacity-20"/>
+                      <span>No requests found in this view.</span>
+                  </div>
+              ) : (
+                  <table className="w-full text-left border-collapse">
+                      <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold border-b border-slate-100">
+                          <tr>
+                              <th className="px-6 py-4 w-24 whitespace-nowrap">ID</th>
+                              {activeTab !== 'MY_REQUESTS' && <th className="px-6 py-4 min-w-[200px]">Requester</th>}
+                              <th className="px-6 py-4 min-w-[250px]">Destination</th>
+                              <th className="px-6 py-4 w-32 whitespace-nowrap">Status</th>
+                              <th className="px-6 py-4 w-32 text-right whitespace-nowrap">Cost</th>
+                              <th className="px-6 py-4 w-24 text-right whitespace-nowrap">Action</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                          {displayRequests.map(req => (
+                              <tr key={req.id} className="hover:bg-blue-50/30 transition-colors group cursor-pointer" onClick={() => onEdit(req)}>
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                      <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{formatRequestId(req.id)}</span>
+                                  </td>
+                                  
+                                  {activeTab !== 'MY_REQUESTS' && (
+                                      <td className="px-6 py-4">
+                                          <div className="flex items-center gap-2">
+                                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0
+                                                  ${req.requesterId === user?.id ? 'bg-blue-500' : 'bg-slate-400'}`}>
+                                                  {req.requesterName.charAt(0)}
+                                              </div>
+                                              <div className="min-w-0">
+                                                  <div className="text-sm font-bold text-slate-800 truncate">{req.requesterName}</div>
+                                                  <div className="text-[10px] text-slate-400 truncate">{req.requesterId}</div>
+                                              </div>
+                                          </div>
+                                      </td>
+                                  )}
 
-      {/* Employee & Approver Table View (Conditional) */}
-      {role !== 'ADS' && dashboardConfig.showRecentRequests && (
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden print:hidden">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                <h2 className="text-lg font-bold text-slate-800">
-                    {isApprover && pendingApprovals.length > 0 ? 'Approvals Required' : isIT ? 'System Requests Log' : t('dash.list.recent')}
-                </h2>
-                <button 
-                    onClick={onViewAllRequests}
-                    className="text-sm font-bold text-primary hover:opacity-80 flex items-center gap-1 transition-colors"
-                >
-                    {t('dash.list.viewAll')} <ArrowRight size={16}/>
-                </button>
-            </div>
-            {/* Table Code (Same as previous, utilizing dynamic recentRequests) */}
-            <div className="overflow-x-auto">
-                <table className="w-full">
-                    <thead className="bg-slate-50">
-                    <tr>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('dash.table.id')}</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('dash.table.detail')}</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('dash.table.status')}</th>
-                        <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('dash.table.cost')}</th>
-                        <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('dash.table.actions')}</th>
-                    </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                    {(isApprover && pendingApprovals.length > 0 ? pendingApprovals : recentRequests).map((req) => (
-                        <tr key={req.id} onClick={() => onEdit(req)} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
-                            <td className="px-6 py-4 font-mono text-sm">{formatRequestId(req.id)}</td>
-                            <td className="px-6 py-4">
-                                <span className="font-bold text-slate-800 block">{req.trip.destination}</span>
-                                <span className="text-xs text-slate-500">{formatDate(req.trip.startDate)}</span>
-                            </td>
-                            <td className="px-6 py-4"><StatusBadge status={req.status}/></td>
-                            <td className="px-6 py-4 text-right font-bold text-slate-700">{formatCurrency(req.actualCost || req.estimatedCost)}</td>
-                            <td className="px-6 py-4 text-right">
-                                {isApprover && req.status === RequestStatus.PENDING_APPROVAL ? (
-                                    <button onClick={(e) => {e.stopPropagation(); onReview?.(req)}} className="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold shadow-md hover:bg-green-700 transition-colors">Review</button>
-                                ) : (
-                                    <button onClick={(e) => {e.stopPropagation(); onEdit(req)}} className="text-slate-400 hover:text-blue-600 transition-colors"><Pencil size={16}/></button>
-                                )}
-                            </td>
-                        </tr>
-                    ))}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                                  <td className="px-6 py-4">
+                                      <div className="flex items-center gap-3">
+                                          {/* Visual Icon based on travel type */}
+                                          <div className={`p-2 rounded-lg shrink-0 ${req.travelType === 'INTERNATIONAL' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                              <Plane size={18}/>
+                                          </div>
+                                          <div className="min-w-0">
+                                              <div className="font-bold text-slate-800 text-sm flex items-center gap-2 truncate">
+                                                  {req.trip.destination}
+                                                  {req.travelType === 'INTERNATIONAL' && <span className="text-[10px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200 whitespace-nowrap">INTL</span>}
+                                              </div>
+                                              <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                                                  <Clock size={10}/> {formatDate(req.trip.startDate)}
+                                              </div>
+                                          </div>
+                                      </div>
+                                  </td>
+
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                      <StatusBadge status={req.status}/>
+                                      {/* SLA Badge for ADS/Manager */}
+                                      {activeTab !== 'MY_REQUESTS' && req.slaDeadline && (
+                                          <div className={`mt-1 text-[10px] font-bold px-2 py-0.5 rounded w-fit flex items-center gap-1
+                                              ${getSLAStatus(req.slaDeadline, req.status)?.urgent ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}>
+                                              <Clock size={10}/> {getSLAStatus(req.slaDeadline, req.status)?.label}
+                                          </div>
+                                      )}
+                                  </td>
+
+                                  <td className="px-6 py-4 text-right whitespace-nowrap">
+                                      <div className="font-bold text-slate-700">{formatCurrency(req.actualCost || req.estimatedCost)}</div>
+                                      <div className="text-[10px] text-slate-400">Total</div>
+                                  </td>
+
+                                  <td className="px-6 py-4 text-right whitespace-nowrap">
+                                      {/* Action Buttons based on Role & Status */}
+                                      <div className="flex justify-end gap-2" onClick={e => e.stopPropagation()}>
+                                          
+                                          {/* Manager Action: Review */}
+                                          {role === 'Manager' && req.status === RequestStatus.PENDING_APPROVAL && (
+                                              <button onClick={() => onReview?.(req)} className="btn-action bg-orange-100 text-orange-700 hover:bg-orange-200">
+                                                  Review
+                                              </button>
+                                          )}
+
+                                          {/* ADS Actions */}
+                                          {role === 'ADS' && (
+                                              <>
+                                                  {req.status === RequestStatus.SUBMITTED && (
+                                                      <button onClick={() => onProcessRequest?.(req)} className="btn-action bg-blue-100 text-blue-700 hover:bg-blue-200">
+                                                          Process
+                                                      </button>
+                                                  )}
+                                                  {req.status === RequestStatus.APPROVED && (
+                                                      <button onClick={() => onBookRequest?.(req)} className="btn-action bg-green-100 text-green-700 hover:bg-green-200">
+                                                          Book
+                                                      </button>
+                                                  )}
+                                              </>
+                                          )}
+
+                                          {/* Employee Actions */}
+                                          {(role === 'Employee' || req.requesterId === user?.id) && (
+                                              <>
+                                                  {req.status === RequestStatus.WAITING_EMPLOYEE_SELECTION && (
+                                                      <button onClick={() => onEdit(req)} className="btn-action bg-pink-100 text-pink-700 hover:bg-pink-200 animate-pulse">
+                                                          Select Option
+                                                      </button>
+                                                  )}
+                                                  <button onClick={() => onEdit(req)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg">
+                                                      <Pencil size={16}/>
+                                                  </button>
+                                              </>
+                                          )}
+                                      </div>
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              )}
+          </div>
+      </div>
+
+      <style>{`
+        .btn-action { @apply px-3 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm; }
+      `}</style>
+
+      {/* Hidden Print Component */}
+      {printRequest && (
+          <div className="hidden print:block print:fixed print:inset-0 print:bg-white print:z-[100]">
+              <PrintSingleTicket request={printRequest}/>
+          </div>
       )}
     </div>
   );

@@ -6,6 +6,7 @@ import { useTranslation } from '../services/translations';
 import { StatusBadge } from './common/StatusBadge'; // Shared
 import { formatCurrency, formatDate, formatRequestId } from '../utils/formatters'; // Shared
 import { getTravelTypeStyle } from '../utils/styleHelpers'; // Shared
+import { ServiceIcon } from './common/ServiceIcon'; // Shared
 
 interface RequestListProps {
   requests: TravelRequest[];
@@ -112,9 +113,14 @@ export const RequestList: React.FC<RequestListProps> = ({ requests, onEdit, onDe
                                     <span className={`inline-flex items-center w-fit px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getTravelTypeStyle(req.travelType)}`}>
                                         {req.travelType === 'INTERNATIONAL' ? t('common.international') : t('common.domestic')}
                                     </span>
-                                    <span className="text-xs text-slate-500 flex items-center gap-1">
-                                        <Users size={10}/> {t(`common.${req.requestFor.toLowerCase()}`)}
-                                    </span>
+                                    {/* Service Icons */}
+                                    <div className="flex gap-1 mt-1">
+                                        {[...new Set(req.services.map(s => s.type))].map(type => (
+                                            <div key={type} className="bg-slate-100 p-1 rounded-full text-slate-500" title={type}>
+                                                <ServiceIcon type={type} size={12}/>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </td>
                             <td className="px-6 py-4">
